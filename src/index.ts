@@ -83,6 +83,22 @@ import {
   buildEditorPrivateMenuFlexCard,
 } from "./services/notifications/line/flex-templates";
 
+const showTypingIndicator = async (chatId: string, token: string, seconds = 20) => {
+  if (!chatId) return;
+  try {
+    await fetch("https://api.line.me/v2/bot/chat/loading/start", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ chatId, loadingSeconds: seconds }),
+    });
+  } catch (err) {
+    console.error("[TYPING INDICATOR ERROR]", err);
+  }
+};
+
 app.post("/webhook/line", async (c: any) => {
   try {
     const db = c.get("db");
@@ -94,9 +110,12 @@ app.post("/webhook/line", async (c: any) => {
       const source = event?.source;
       const replyToken = event?.replyToken;
       const userMsg = event?.message?.text?.trim() || "";
+      
+      const chatId = source?.userId || source?.groupId || source?.roomId;
 
       if (replyToken) {
         if (userMsg === "สรุปงานวันนี้") {
+          await showTypingIndicator(chatId, token);
           const allClips = await db.query.clips.findMany();
           const pending = allClips.filter(
             (c: any) => c.status === "PENDING_REVIEW" || c.status === "IN_REVIEW",
@@ -133,6 +152,7 @@ app.post("/webhook/line", async (c: any) => {
             }),
           }).catch((err) => console.error("[LINE REPLY SUMMARY ERROR]", err));
         } else if (userMsg === "งานของฉัน" && source?.userId) {
+          await showTypingIndicator(chatId, token);
           const user = await db.query.users.findFirst({
             where: (u: any, { eq }: any) => eq(u.lineUserId, source.userId),
           });
@@ -167,6 +187,7 @@ app.post("/webhook/line", async (c: any) => {
           }).catch((err) => console.error("[LINE REPLY TASKS ERROR]", err));
         } else if (source?.type === "user" && source?.userId) {
           // 1-on-1 Private chat default response
+          await showTypingIndicator(chatId, token);
           const user = await db.query.users.findFirst({
             where: (u: any, { eq }: any) => eq(u.lineUserId, source.userId),
           });
