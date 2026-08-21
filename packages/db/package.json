@@ -1,0 +1,11 @@
+{
+  "name": "@clipflow/db",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "drizzle-orm": "^0.36.0",
+    "@neondatabase/serverless": "^0.10.0"
+  }
+}
