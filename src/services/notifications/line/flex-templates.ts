@@ -328,7 +328,7 @@ export async function notifyLoginSuccess({
           action: {
             type: "uri",
             label: "เปิดดูหน้างานของฉัน 🚀",
-            uri: `${baseUrl}/tasks`,
+            uri: getLiffUrl("/tasks"),
           },
         },
       ],
@@ -1204,7 +1204,7 @@ export async function notifyTasksAssigned({
           action: {
             type: "uri",
             label: `เปิดดูงานทั้งหมด (${tasks.length} คลิป) 🚀`,
-            uri: `${baseUrl}/tasks`,
+            uri: getLiffUrl("/tasks"),
           },
         },
       ],
@@ -1670,7 +1670,7 @@ export function buildMyTasksFlexCard({
           action: {
             type: "uri",
             label: "เปิดดูงานทั้งหมดในระบบ 🔍",
-            uri: "https://referring-opening-yoga-went.trycloudflare.com/tasks",
+            uri: getLiffUrl("/tasks"),
           },
         },
       ],
@@ -1765,7 +1765,7 @@ export function buildEditorPrivateMenuFlexCard({
               action: {
                 type: "uri",
                 label: "📤 เข้าหน้าส่งคลิปงานใหม่",
-                uri: `${baseUrl}/submit`,
+                uri: getLiffUrl("/submit"),
               },
             },
           ],
