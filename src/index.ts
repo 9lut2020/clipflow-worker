@@ -81,6 +81,8 @@ import {
   buildDailySummaryFlexCard,
   buildMyTasksFlexCard,
   buildEditorPrivateMenuFlexCard,
+  buildLoginRequiredFlexCard,
+  buildPendingReviewFlexCard,
 } from "./services/notifications/line/flex-templates";
 
 const showTypingIndicator = async (chatId: string, token: string, seconds = 20) => {
@@ -113,19 +115,82 @@ app.post("/webhook/line", async (c: any) => {
       
       const chatId = source?.userId || source?.groupId || source?.roomId;
 
-      if (replyToken) {
+      if (!replyToken) continue;
+
+      if (source?.type === "user") {
+        // --- PRIVATE CHAT LOGIC ---
+        await showTypingIndicator(chatId, token);
+        const user = await db.query.users.findFirst({
+          where: (u: any, { eq }: any) => eq(u.lineUserId, source.userId),
+        });
+
+        // 1. Unregistered User check
+        if (!user) {
+          const flexContents = buildLoginRequiredFlexCard();
+          await fetch("https://api.line.me/v2/bot/message/reply", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              replyToken,
+              messages: [{ type: "flex", altText: "🔒 กรุณาเข้าสู่ระบบก่อนใช้งาน", contents: flexContents }],
+            }),
+          }).catch((err) => console.error("[LINE REPLY LOGIN REQUIRED ERROR]", err));
+          continue;
+        }
+
+        // 2. Registered User Commands
+        if (userMsg === "งานของฉัน") {
+          const myClips = await db.query.clips.findMany({
+            where: (clips: any, { eq, and, ne }: any) => 
+              and(eq(clips.ownerId, user.id), ne(clips.status, "APPROVED")),
+          });
+
+          const flexContents = buildMyTasksFlexCard({
+            displayName: user?.displayName || "คุณ",
+            clips: myClips,
+          });
+
+          await fetch("https://api.line.me/v2/bot/message/reply", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              replyToken,
+              messages: [{ type: "flex", altText: "📋 งานของฉัน - ClipFlow", contents: flexContents }],
+            }),
+          }).catch((err) => console.error("[LINE REPLY MY TASKS ERROR]", err));
+        } else {
+          // Default Menu for Private Chat
+          const flexContents = buildEditorPrivateMenuFlexCard({
+            displayName: user?.displayName,
+          });
+
+          await fetch("https://api.line.me/v2/bot/message/reply", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              replyToken,
+              messages: [{ type: "flex", altText: "🎬 CLIPFLOW Editor Assistant", contents: flexContents }],
+            }),
+          }).catch((err) => console.error("[LINE REPLY PRIVATE MENU ERROR]", err));
+        }
+
+      } else if (source?.type === "group" || source?.type === "room") {
+        // --- GROUP CHAT LOGIC ---
         if (userMsg === "สรุปงานวันนี้") {
           await showTypingIndicator(chatId, token);
           const allClips = await db.query.clips.findMany();
-          const pending = allClips.filter(
-            (c: any) => c.status === "PENDING_REVIEW" || c.status === "IN_REVIEW",
-          ).length;
-          const revision = allClips.filter(
-            (c: any) => c.status === "NEEDS_REVISION",
-          ).length;
-          const approved = allClips.filter(
-            (c: any) => c.status === "APPROVED",
-          ).length;
+          const pending = allClips.filter((c: any) => c.status === "PENDING_REVIEW" || c.status === "IN_REVIEW").length;
+          const revision = allClips.filter((c: any) => c.status === "NEEDS_REVISION").length;
+          const approved = allClips.filter((c: any) => c.status === "APPROVED").length;
 
           const flexContents = buildDailySummaryFlexCard({
             pending,
@@ -142,31 +207,17 @@ app.post("/webhook/line", async (c: any) => {
             },
             body: JSON.stringify({
               replyToken,
-              messages: [
-                {
-                  type: "flex",
-                  altText: "📊 สรุปภาพรวมงานวันนี้ - ClipFlow",
-                  contents: flexContents,
-                },
-              ],
+              messages: [{ type: "flex", altText: "📊 สรุปภาพรวมงานวันนี้ - ClipFlow", contents: flexContents }],
             }),
           }).catch((err) => console.error("[LINE REPLY SUMMARY ERROR]", err));
-        } else if (userMsg === "งานของฉัน" && source?.userId) {
+
+        } else if (userMsg === "งานที่ต้องตรวจ") {
           await showTypingIndicator(chatId, token);
-          const user = await db.query.users.findFirst({
-            where: (u: any, { eq }: any) => eq(u.lineUserId, source.userId),
-          });
+          const allClips = await db.query.clips.findMany();
+          const pending = allClips.filter((c: any) => c.status === "PENDING_REVIEW" || c.status === "IN_REVIEW").length;
+          const revision = allClips.filter((c: any) => c.status === "NEEDS_REVISION").length;
 
-          const myClips = user
-            ? await db.query.clips.findMany({
-                where: (clips: any, { eq }: any) => eq(clips.ownerId, user.id),
-              })
-            : [];
-
-          const flexContents = buildMyTasksFlexCard({
-            displayName: user?.displayName || "คุณ",
-            clips: myClips,
-          });
+          const flexContents = buildPendingReviewFlexCard({ pending, revision });
 
           await fetch("https://api.line.me/v2/bot/message/reply", {
             method: "POST",
@@ -176,44 +227,11 @@ app.post("/webhook/line", async (c: any) => {
             },
             body: JSON.stringify({
               replyToken,
-              messages: [
-                {
-                  type: "flex",
-                  altText: `📋 งานของฉัน - ClipFlow`,
-                  contents: flexContents,
-                },
-              ],
+              messages: [{ type: "flex", altText: "🔍 งานที่รอการตรวจสอบ - ClipFlow", contents: flexContents }],
             }),
-          }).catch((err) => console.error("[LINE REPLY TASKS ERROR]", err));
-        } else if (source?.type === "user" && source?.userId) {
-          // 1-on-1 Private chat default response
-          await showTypingIndicator(chatId, token);
-          const user = await db.query.users.findFirst({
-            where: (u: any, { eq }: any) => eq(u.lineUserId, source.userId),
-          });
-
-          const flexContents = buildEditorPrivateMenuFlexCard({
-            displayName: user?.displayName,
-          });
-
-          await fetch("https://api.line.me/v2/bot/message/reply", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              replyToken,
-              messages: [
-                {
-                  type: "flex",
-                  altText: "🎬 CLIPFLOW Editor Assistant",
-                  contents: flexContents,
-                },
-              ],
-            }),
-          }).catch((err) => console.error("[LINE REPLY PRIVATE MENU ERROR]", err));
+          }).catch((err) => console.error("[LINE REPLY PENDING REVIEW ERROR]", err));
         }
+        // Group chat silently ignores all other messages
       }
     }
     return c.text("OK", 200);
