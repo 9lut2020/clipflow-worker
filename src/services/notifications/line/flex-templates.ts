@@ -1885,3 +1885,185 @@ export async function notifyReviewerRoleGranted({
     channelAccessToken,
   });
 }
+
+/**
+ * Build Flex Card for 'งานที่ต้องตรวจ' Group Command
+ */
+export function buildPendingReviewFlexCard({
+  pending,
+  revision,
+}: {
+  pending: number;
+  revision: number;
+}) {
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://clipflow.app";
+  
+  return {
+    type: "bubble",
+    size: "mega",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#4F46E5",
+      paddingAll: "lg",
+      contents: [
+        {
+          type: "text",
+          text: "🔍 งานที่รอการตรวจสอบ",
+          weight: "bold",
+          color: "#FFFFFF",
+          size: "lg",
+        },
+      ],
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "md",
+      paddingAll: "lg",
+      contents: [
+        {
+          type: "text",
+          text: "ผู้ตรวจเตรียมตัว! ตอนนี้มีงานที่รออยู่ในระบบดังนี้:",
+          size: "sm",
+          color: "#475569",
+          wrap: true,
+        },
+        {
+          type: "box",
+          layout: "vertical",
+          margin: "md",
+          spacing: "sm",
+          contents: [
+            {
+              type: "box",
+              layout: "baseline",
+              spacing: "sm",
+              contents: [
+                {
+                  type: "text",
+                  text: "⏳ รอคุณตรวจ (Pending):",
+                  color: "#64748B",
+                  size: "sm",
+                  flex: 3,
+                  wrap: true,
+                },
+                {
+                  type: "text",
+                  text: `${pending} งาน`,
+                  weight: "bold",
+                  color: "#D97706",
+                  size: "sm",
+                  flex: 2,
+                  align: "end",
+                },
+              ],
+            },
+            {
+              type: "box",
+              layout: "baseline",
+              spacing: "sm",
+              contents: [
+                {
+                  type: "text",
+                  text: "⚠️ รอ Editor แก้ (Revision):",
+                  color: "#64748B",
+                  size: "sm",
+                  flex: 3,
+                  wrap: true,
+                },
+                {
+                  type: "text",
+                  text: `${revision} งาน`,
+                  weight: "bold",
+                  color: "#E11D48",
+                  size: "sm",
+                  flex: 2,
+                  align: "end",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      paddingAll: "lg",
+      contents: [
+        {
+          type: "button",
+          style: "primary",
+          color: "#4F46E5",
+          action: {
+            type: "uri",
+            label: "เข้าไปตรวจงาน 🚀",
+            uri: `${baseUrl}/dashboard`,
+          },
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * Build Flex Card to prompt unregistered users to login
+ */
+export function buildLoginRequiredFlexCard() {
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://clipflow.app";
+  
+  return {
+    type: "bubble",
+    size: "mega",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#E11D48",
+      paddingAll: "lg",
+      contents: [
+        {
+          type: "text",
+          text: "🔒 กรุณาเข้าสู่ระบบก่อนใช้งาน",
+          weight: "bold",
+          color: "#FFFFFF",
+          size: "lg",
+        },
+      ],
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "md",
+      paddingAll: "lg",
+      contents: [
+        {
+          type: "text",
+          text: "บัญชี LINE ของคุณยังไม่ได้ผูกกับระบบ ClipFlow กรุณาเข้าสู่ระบบผ่านปุ่มด้านล่างเพื่อยืนยันตัวตนครับ",
+          size: "sm",
+          color: "#475569",
+          wrap: true,
+        },
+      ],
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      paddingAll: "lg",
+      contents: [
+        {
+          type: "button",
+          style: "primary",
+          color: "#E11D48",
+          action: {
+            type: "uri",
+            label: "เปิดระบบเข้าใช้งาน",
+            uri: baseUrl,
+          },
+        },
+      ],
+    },
+  };
+}
