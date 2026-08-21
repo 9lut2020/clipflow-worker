@@ -1,0 +1,31 @@
+{
+  "name": "@clipflow/worker",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "wrangler dev --ip 0.0.0.0 --port 8787 --show-interactive-dev-session=false",
+    "build": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy",
+    "type-check": "tsc --noEmit",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "@hono/zod-validator": "^0.4.0",
+    "drizzle-orm": "^0.36.0",
+    "@neondatabase/serverless": "^0.10.0",
+    "zod": "^3.23.0",
+    "@clipflow/db": "workspace:*",
+    "@clipflow/types": "workspace:*",
+    "@clipflow/validations": "workspace:*",
+    "@clipflow/lib": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241022.0",
+    "wrangler": "^4.0.0",
+    "typescript": "^5"
+  }
+}

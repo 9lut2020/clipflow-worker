@@ -1,0 +1,32 @@
+name = "clipflow-worker"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ENVIRONMENT = "development"
+
+# ---- Queues ----
+[[queues.producers]]
+binding = "NOTIFICATION_QUEUE"
+queue = "clipflow-notifications"
+
+[[queues.consumers]]
+queue = "clipflow-notifications"
+max_batch_size = 10
+max_batch_timeout = 5
+
+# ---- Cron Triggers ----
+[triggers]
+crons = [
+  "*/5 * * * *",
+  "*/10 * * * *"
+]
+
+# ---- Secrets (set via: wrangler secret put SECRET_NAME) ----
+# DATABASE_URL
+# LINE_CHANNEL_ACCESS_TOKEN
+# LINE_CHANNEL_SECRET
+# LINE_LIFF_ID
+# GOOGLE_SERVICE_ACCOUNT_KEY
+# JWT_SECRET

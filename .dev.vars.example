@@ -1,0 +1,17 @@
+# =============================================
+# apps/worker/.dev.vars  →  Wrangler Local Dev
+# =============================================
+# ไฟล์นี้ใช้ตอน `wrangler dev` เท่านั้น (local)
+# ห้าม commit ขึ้น Git
+#
+# Production secrets → ใส่ผ่าน:
+#   wrangler secret put DATABASE_URL
+#   wrangler secret put LINE_CHANNEL_ACCESS_TOKEN
+#   ...
+
+DATABASE_URL=postgresql://user:pass@ep-xxx.neon.tech/clipflow?sslmode=require
+LINE_CHANNEL_ACCESS_TOKEN=
+LINE_CHANNEL_SECRET=
+LINE_LIFF_ID=
+GOOGLE_SERVICE_ACCOUNT_KEY=
+JWT_SECRET=your-secret-key-here

@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["@cloudflare/workers-types"],
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@clipflow/db": ["./packages/db/src/index.ts"],
+      "@clipflow/types": ["./packages/types/src/index.ts"],
+      "@clipflow/validations": ["./packages/validations/src/index.ts"],
+      "@clipflow/lib": ["./packages/lib/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "packages/**/*.ts"]
+}
