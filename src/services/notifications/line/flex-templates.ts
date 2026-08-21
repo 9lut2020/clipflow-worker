@@ -1,4 +1,23 @@
 import { sendLinePushFlexMessage, sendLinePushMessage } from "./line.client";
+
+const liffId = process.env.LINE_LIFF_ID;
+
+// ใช้สำหรับ fallbackText (ข้อความธรรมดาเวลาเครื่องผู้ใช้ไม่รองรับ Flex)
+const baseUrl = liffId
+  ? `https://liff.line.me/${liffId}`
+  : process.env.NEXTAUTH_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    "https://clipflow-tmyda.vercel.app";
+
+// ฟังก์ชันนี้จะถูกเรียกใช้โดยปุ่มต่างๆ ใน Flex Card ทั้งหมดด้านล่างครับ
+function getLiffUrl(path?: string) {
+  if (liffId) {
+    const liffUrl = `https://liff.line.me/${liffId}`;
+    return path ? `${liffUrl}?path=${encodeURIComponent(path)}` : liffUrl;
+  }
+  return path ? `${baseUrl}${path}` : baseUrl;
+}
+
 /**
  * Service for sending LINE Push Notifications via LINE Messaging API
  * Specifically configured with Flex Card Message UI for Editor (User) notifications
@@ -18,7 +37,6 @@ export async function notifyTestClipflowFlexCard({
   const timeStr = new Date().toLocaleString("th-TH", {
     timeZone: "Asia/Bangkok",
   });
-  const baseUrl = process.env.NEXTAUTH_URL || "https://clipflow.app";
 
   const flexContents = {
     type: "bubble",
@@ -166,7 +184,7 @@ export async function notifyTestClipflowFlexCard({
           action: {
             type: "uri",
             label: "เปิดดูระบบ ClipFlow 🚀",
-            uri: baseUrl,
+            uri: getLiffUrl(),
           },
         },
       ],
@@ -197,7 +215,6 @@ export async function notifyLoginSuccess({
   const timeStr = new Date().toLocaleString("th-TH", {
     timeZone: "Asia/Bangkok",
   });
-  const baseUrl = process.env.NEXTAUTH_URL || "https://clipflow.app";
 
   const flexContents = {
     type: "bubble",
@@ -347,7 +364,6 @@ export async function notifyNeedsRevision({
   clipId: string;
   channelAccessToken?: string;
 }) {
-  const baseUrl = process.env.NEXTAUTH_URL || "https://clipflow.app";
   const clipUrl = `${baseUrl}/clips/${clipId}`;
 
   const flexContents = {
@@ -534,7 +550,6 @@ export async function notifyClipApproved({
   clipId: string;
   channelAccessToken?: string;
 }) {
-  const baseUrl = process.env.NEXTAUTH_URL || "https://clipflow.app";
   const clipUrl = `${baseUrl}/clips/${clipId}`;
 
   const flexContents = {
@@ -721,7 +736,6 @@ export async function notifySubmissionPending({
   clipId: string;
   channelAccessToken?: string;
 }) {
-  const baseUrl = process.env.NEXTAUTH_URL || "https://clipflow.app";
   const clipUrl = `${baseUrl}/clips/${clipId}`;
 
   const flexContents = {
@@ -882,7 +896,6 @@ export async function notifyTaskAssigned({
   clipId: string;
   channelAccessToken?: string;
 }) {
-  const baseUrl = process.env.NEXTAUTH_URL || "https://clipflow.app";
   const clipUrl = `${baseUrl}/clips/${clipId}`;
 
   const flexContents = {
@@ -1039,8 +1052,6 @@ export async function notifyTasksAssigned({
 }) {
   if (!tasks || tasks.length === 0)
     return { success: false, message: "No tasks provided" };
-
-  const baseUrl = process.env.NEXTAUTH_URL || "https://clipflow.app";
 
   if (tasks.length === 1) {
     const single = tasks[0];
@@ -1232,11 +1243,12 @@ export async function notifyAdminGroupNewSubmission({
   const targetId = adminGroupId || (process.env as any)?.LINE_REVIEWER_GROUP_ID;
 
   if (!targetId) {
-    console.warn("[LINE GROUP] LINE_REVIEWER_GROUP_ID is missing. Notification skipped.");
+    console.warn(
+      "[LINE GROUP] LINE_REVIEWER_GROUP_ID is missing. Notification skipped.",
+    );
     return { success: false, message: "Missing LINE_REVIEWER_GROUP_ID" };
   }
 
-  const baseUrl = process.env.NEXTAUTH_URL || "https://clipflow.app";
   const clipUrl = `${baseUrl}/clips/${clipId}`;
 
   const flexContents = {
@@ -1547,7 +1559,7 @@ export function buildDailySummaryFlexCard({
           action: {
             type: "uri",
             label: "เข้าสู่ระบบเพื่อจัดการงาน 🚀",
-            uri: "https://referring-opening-yoga-went.trycloudflare.com/dashboard",
+            uri: getLiffUrl("/menu"),
           },
         },
       ],
@@ -1674,9 +1686,6 @@ export function buildEditorPrivateMenuFlexCard({
 }: {
   displayName?: string;
 }) {
-  const baseUrl =
-    process.env.NEXTAUTH_URL || "https://clipflow-tmyda.vercel.app";
-
   return {
     type: "bubble",
     size: "mega",
@@ -1774,7 +1783,7 @@ export function buildEditorPrivateMenuFlexCard({
           action: {
             type: "uri",
             label: "🌐 เปิดเว็บไซต์ ClipFlow",
-            uri: baseUrl,
+            uri: getLiffUrl(),
           },
         },
       ],
@@ -1793,7 +1802,6 @@ export async function notifyReviewerRoleGranted({
   groupInviteUrl?: string;
   channelAccessToken?: string;
 }) {
-  const baseUrl = process.env.NEXTAUTH_URL || "https://clipflow.app";
   const inviteUrl = "https://line.me/ti/g/vugydTHe7q";
 
   const flexContents = {
@@ -1868,7 +1876,7 @@ export async function notifyReviewerRoleGranted({
           action: {
             type: "uri",
             label: "เข้าสู่ระบบ ClipFlow Web App 🌐",
-            uri: `${baseUrl}/dashboard`,
+            uri: getLiffUrl("/dashboard"),
           },
         },
       ],
@@ -1896,8 +1904,6 @@ export function buildPendingReviewFlexCard({
   pending: number;
   revision: number;
 }) {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://clipflow.app";
-  
   return {
     type: "bubble",
     size: "mega",
@@ -2000,7 +2006,7 @@ export function buildPendingReviewFlexCard({
           action: {
             type: "uri",
             label: "เข้าไปตรวจงาน 🚀",
-            uri: `${baseUrl}/dashboard`,
+            uri: getLiffUrl("/dashboard"),
           },
         },
       ],
@@ -2012,8 +2018,6 @@ export function buildPendingReviewFlexCard({
  * Build Flex Card to prompt unregistered users to login
  */
 export function buildLoginRequiredFlexCard() {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://clipflow.app";
-  
   return {
     type: "bubble",
     size: "mega",
@@ -2060,7 +2064,7 @@ export function buildLoginRequiredFlexCard() {
           action: {
             type: "uri",
             label: "เปิดระบบเข้าใช้งาน",
-            uri: baseUrl,
+            uri: getLiffUrl(),
           },
         },
       ],
