@@ -19,8 +19,14 @@ clips.get("/", async (c: Context) => {
   const db = c.get("db");
   const episodeId = c.req.query("episodeId");
   const ownerId = c.req.query("ownerId");
-  const status = c.req.query("status");
+  const statusParam = c.req.query("status");
+  const status = statusParam?.includes(",") ? statusParam.split(",") : statusParam;
   const excludeApproved = c.req.query("excludeApproved") === "true";
+  
+  const limitStr = c.req.query("limit");
+  const offsetStr = c.req.query("offset");
+  const limit = limitStr ? parseInt(limitStr, 10) : undefined;
+  const offset = offsetStr ? parseInt(offsetStr, 10) : undefined;
 
   const allClips = await ClipService.listClips({
     db,
@@ -28,6 +34,8 @@ clips.get("/", async (c: Context) => {
     ownerId,
     status,
     excludeApproved,
+    limit,
+    offset,
   });
 
   return c.json({
@@ -125,5 +133,105 @@ clips.post("/:id/revisions", zValidator("json", ClipSubmitRevisionSchema), async
       },
       500,
     );
+  }
+});
+
+/**
+ * DELETE /clips/:id
+ * Delete a clip by ID
+ */
+clips.delete("/:id", async (c: Context) => {
+  const db = c.get("db");
+  const id = c.req.param("id") as string;
+  
+  try {
+    const { eq } = await import("drizzle-orm");
+    const { clips: clipsTable } = await import("@clipflow/db");
+    
+    const result = await db.delete(clipsTable).where(eq(clipsTable.id, id)).returning();
+    
+    if (result.length === 0) {
+      return c.json({ status: "error", message: "Clip not found or already deleted", data: null }, 404);
+    }
+    
+    return c.json({ status: "success", message: "Clip deleted successfully", data: result[0] });
+  } catch (err: any) {
+    console.error("Failed to delete clip:", err);
+    return c.json({ status: "error", message: "Failed to delete clip", data: null }, 500);
+  }
+});
+
+/**
+ * GET /clips/:id/published-posts
+ * List all published posts for a clip
+ */
+clips.get("/:id/published-posts", async (c: Context) => {
+  const db = c.get("db");
+  const clipId = c.req.param("id") as string;
+  
+  try {
+    const { eq, desc } = await import("drizzle-orm");
+    const { publishedPosts, users } = await import("@clipflow/db");
+    
+    const posts = await db.select({
+      id: publishedPosts.id,
+      clipId: publishedPosts.clipId,
+      platform: publishedPosts.platform,
+      caption: publishedPosts.caption,
+      url: publishedPosts.url,
+      publishedAt: publishedPosts.publishedAt,
+      publishedBy: users.displayName,
+    })
+    .from(publishedPosts)
+    .leftJoin(users, eq(publishedPosts.publishedBy, users.id))
+    .where(eq(publishedPosts.clipId, clipId))
+    .orderBy(desc(publishedPosts.publishedAt));
+    
+    return c.json({ status: "success", message: "Published posts retrieved", data: posts });
+  } catch (err: any) {
+    console.error("Failed to fetch published posts:", err);
+    return c.json({ status: "error", message: "Failed to fetch published posts", data: null }, 500);
+  }
+});
+
+/**
+ * POST /clips/:id/publish
+ * Record a new published post
+ */
+clips.post("/:id/publish", async (c: Context) => {
+  const db = c.get("db");
+  const clipId = c.req.param("id") as string;
+  
+  try {
+    const body = await c.req.json();
+    const { platform, caption, url, publishedAt, publishedBy } = body;
+    
+    const userId = c.get("user")?.id || publishedBy;
+    if (!userId) {
+      return c.json({ status: "error", message: "User ID required", data: null }, 401);
+    }
+    
+    const { publishedPosts, clips: clipsTable } = await import("@clipflow/db");
+    const { eq } = await import("drizzle-orm");
+    
+    // 1. Insert published post record
+    const result = await db.insert(publishedPosts).values({
+      clipId,
+      platform,
+      caption,
+      url,
+      publishedAt: publishedAt ? new Date(publishedAt) : new Date(),
+      publishedBy: userId,
+    }).returning();
+    
+    // 2. Update clip status to PUBLISHED
+    await db.update(clipsTable)
+      .set({ status: "PUBLISHED", updatedAt: new Date() })
+      .where(eq(clipsTable.id, clipId));
+      
+    return c.json({ status: "success", message: "Recorded published post", data: result[0] }, 201);
+  } catch (err: any) {
+    console.error("Failed to record publish:", err);
+    return c.json({ status: "error", message: err.message || "Failed to record publish", data: null }, 500);
   }
 });

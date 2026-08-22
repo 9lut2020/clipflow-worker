@@ -206,7 +206,6 @@ projects.get("/:id/clips", async (c: any) => {
       data,
     });
   } catch (error: any) {
-    if (error.message.includes("Forbidden")) {
       return c.json(
         { status: "error", message: error.message, data: null },
         403,
@@ -218,6 +217,54 @@ projects.get("/:id/clips", async (c: any) => {
     );
   }
 });
+
+/**
+ * POST /projects/:id/episodes
+ * ADMIN — Create a new episode for a project
+ */
+const CreateEpisodeSchema = z.object({
+  episodeNo: z.number().int().positive(),
+  name: z.string().optional(),
+});
+
+projects.post(
+  "/:id/episodes",
+  adminOnly,
+  zValidator("json", CreateEpisodeSchema),
+  async (c: any) => {
+    const db = c.get("db");
+    const projectId = c.req.param("id") as string;
+    const { episodeNo, name } = c.req.valid("json");
+
+    try {
+      const { episodes } = await import("@clipflow/db");
+      
+      const [newEpisode] = await db
+        .insert(episodes)
+        .values({
+          projectId,
+          episodeNo,
+          name: name || null,
+        })
+        .returning();
+
+      return c.json(
+        { status: "success", message: "Episode created successfully", data: newEpisode },
+        201
+      );
+    } catch (error: any) {
+      console.error("Failed to create episode:", error);
+      // Handle unique constraint violation on project_id + episode_no (if any)
+      if (error.code === '23505') {
+         return c.json({ status: "error", message: "Episode number already exists", data: null }, 409);
+      }
+      return c.json(
+        { status: "error", message: "Failed to create episode", data: null },
+        500
+      );
+    }
+  }
+);
 
 /**
  * POST /projects/:id/clips/batch

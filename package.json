@@ -13,19 +13,20 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "hono": "^4.6.0",
-    "@hono/zod-validator": "^0.4.0",
-    "drizzle-orm": "^0.36.0",
-    "@neondatabase/serverless": "^0.10.0",
-    "zod": "^3.23.0",
     "@clipflow/db": "workspace:*",
+    "@clipflow/lib": "workspace:*",
     "@clipflow/types": "workspace:*",
     "@clipflow/validations": "workspace:*",
-    "@clipflow/lib": "workspace:*"
+    "@hono/zod-validator": "^0.4.0",
+    "@neondatabase/serverless": "^0.10.0",
+    "drizzle-orm": "^0.36.0",
+    "hono": "^4.6.0",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241022.0",
-    "wrangler": "^4.0.0",
-    "typescript": "^5"
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^5",
+    "wrangler": "^4.0.0"
   }
 }

@@ -7,23 +7,33 @@ export const ClipService = {
     ownerId,
     status,
     excludeApproved,
+    limit,
+    offset,
   }: {
     db: any;
     episodeId?: string;
     ownerId?: string;
-    status?: string;
+    status?: string | string[];
     excludeApproved?: boolean;
+    limit?: number;
+    offset?: number;
   }) {
     return db.query.clips
       .findMany({
-        where: (clipsRow: any, { eq, notInArray, and }: any) => {
+        where: (clipsRow: any, { eq, notInArray, inArray, and }: any) => {
           const conditions: any[] = [];
           if (excludeApproved) {
-            conditions.push(notInArray(clipsRow.status, ["APPROVED", "CANCELLED"]));
+            conditions.push(notInArray(clipsRow.status, ["APPROVED", "PUBLISHED", "CANCELLED"]));
           }
           if (episodeId) conditions.push(eq(clipsRow.episodeId, episodeId));
           if (ownerId) conditions.push(eq(clipsRow.ownerId, ownerId));
-          if (status) conditions.push(eq(clipsRow.status, status));
+          if (status) {
+            if (Array.isArray(status)) {
+              conditions.push(inArray(clipsRow.status, status));
+            } else {
+              conditions.push(eq(clipsRow.status, status));
+            }
+          }
           return conditions.length > 0 ? and(...conditions) : undefined;
         },
         columns: {
@@ -41,7 +51,10 @@ export const ClipService = {
           owner: { columns: { id: true, displayName: true, pictureUrl: true } },
           episode: { columns: { id: true, episodeNo: true, name: true } },
           project: { columns: { id: true, name: true } },
+          publishedPosts: { columns: { id: true, platform: true } },
         },
+        limit,
+        offset,
         orderBy: (clipsRow: any, { desc }: any) => [desc(clipsRow.createdAt)],
       })
       .catch(() => []);

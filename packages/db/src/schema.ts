@@ -24,6 +24,7 @@ export const clipStatusEnum = pgEnum("clip_status", [
   "NEEDS_REVISION",
   "RESUBMITTED",
   "APPROVED",
+  "PUBLISHED",
   "CANCELLED",
 ]);
 
@@ -237,6 +238,25 @@ export const dailyMetrics = pgTable("daily_metrics", {
     .notNull(),
 });
 
+export const publishedPosts = pgTable("published_posts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  clipId: uuid("clip_id")
+    .references(() => clips.id, { onDelete: "cascade" })
+    .notNull(),
+  platform: varchar("platform", { length: 50 }).notNull(),
+  caption: text("caption"),
+  url: text("url"),
+  publishedAt: timestamp("published_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  publishedBy: uuid("published_by")
+    .references(() => users.id)
+    .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
 // Relations with proper Drizzle helper inference
 export const usersRelations = relations(users, (helpers) => ({
   clips: helpers.many(clips),
@@ -272,6 +292,18 @@ export const clipsRelations = relations(clips, (helpers) => ({
   currentRevision: helpers.one(revisions, {
     fields: [clips.currentRevisionId],
     references: [revisions.id],
+  }),
+  publishedPosts: helpers.many(publishedPosts),
+}));
+
+export const publishedPostsRelations = relations(publishedPosts, (helpers) => ({
+  clip: helpers.one(clips, {
+    fields: [publishedPosts.clipId],
+    references: [clips.id],
+  }),
+  publishedBy: helpers.one(users, {
+    fields: [publishedPosts.publishedBy],
+    references: [users.id],
   }),
 }));
 
