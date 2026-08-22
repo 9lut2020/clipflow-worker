@@ -51,6 +51,7 @@ export const authMiddleware = async (c: Context, next: Next) => {
           role: true,
           displayName: true,
           isActive: true,
+          lineUserId: true,
         },
       })
       .catch(() => null);
@@ -62,10 +63,21 @@ export const authMiddleware = async (c: Context, next: Next) => {
       );
     }
 
+    let userRole = user.role as "USER" | "REVIEWER" | "ADMIN";
+    
+    // Allow frontend to override role for bypass/mock users ONLY in development
+    const isDevelopment = process.env.NODE_ENV === "development";
+    if (isDevelopment && user.lineUserId && (user.lineUserId.startsWith("bypass-") || user.lineUserId.startsWith("mock-"))) {
+      const headerRole = c.req.header("x-user-role");
+      if (headerRole === "ADMIN" || headerRole === "REVIEWER" || headerRole === "USER") {
+        userRole = headerRole as any;
+      }
+    }
+
     // Set user context with authoritative database role
     c.set("user", {
       id: user.id,
-      role: user.role as "USER" | "REVIEWER" | "ADMIN",
+      role: userRole,
       name: user.displayName,
     });
 
