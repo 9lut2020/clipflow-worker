@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { linkUserRichMenu } from "./services/notifications/line/line.client";
 
 import { createDb } from "@clipflow/db";
 import { authMiddleware } from "./middleware/auth";
@@ -126,6 +127,13 @@ app.post("/webhook/line", async (c: any) => {
 
         // 1. Unregistered User check
         if (!user) {
+          // Link register richmenu dynamically
+          if (source?.userId) {
+            linkUserRichMenu(source.userId, "richmenu-98bca41053454b957ef38c486f18ab17", token).catch((err) => {
+              console.error("[LINE LINK REGISTER RICHMENU ERROR]", err);
+            });
+          }
+
           const flexContents = buildLoginRequiredFlexCard();
           await fetch("https://api.line.me/v2/bot/message/reply", {
             method: "POST",
