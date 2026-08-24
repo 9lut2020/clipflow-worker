@@ -62,7 +62,7 @@ users.get("/:id", async (c: Context) => {
       const token = (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN;
       const promise = linkUserRichMenu(
         user.lineUserId,
-        "richmenu-eecdcd78d9f5b0a1a6497d0ca641d607",
+        "richmenu-ef15fa6907fdac8343ffa8d28c7fa614",
         token
       );
       if (c.executionCtx?.waitUntil) {
@@ -154,7 +154,7 @@ users.post("/sync", zValidator("json", UserSyncSchema), async (c) => {
       const token = (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN;
       const promise = linkUserRichMenu(
         user.lineUserId,
-        "richmenu-eecdcd78d9f5b0a1a6497d0ca641d607",
+        "richmenu-ef15fa6907fdac8343ffa8d28c7fa614",
         token
       );
       if (c.executionCtx?.waitUntil) {
