@@ -56,6 +56,25 @@ users.get("/:id", async (c: Context) => {
     );
   }
 
+  // Ensure logged-in user gets linked to the Menu-Editor Richmenu
+  if (user.lineUserId) {
+    try {
+      const token = (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN;
+      const promise = linkUserRichMenu(
+        user.lineUserId,
+        "richmenu-eecdcd78d9f5b0a1a6497d0ca641d607",
+        token
+      );
+      if (c.executionCtx?.waitUntil) {
+        c.executionCtx.waitUntil(promise);
+      } else {
+        promise.catch(() => {});
+      }
+    } catch (err) {
+      console.error("[LINE LINK RICHMENU GET USER ERROR]", err);
+    }
+  }
+
   return c.json({
     status: "success",
     message: "User retrieved successfully",
