@@ -79,7 +79,7 @@ clips.get("/:id", async (c: Context) => {
 clips.patch(
   "/:id/schedule",
   zValidator("json", ClipScheduleSchema),
-  async (c: Context) => {
+  async (c) => {
     const db = c.get("db");
     const id = c.req.param("id") as string;
     const body = c.req.valid("json");
