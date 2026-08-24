@@ -51,7 +51,6 @@ export const ClipService = {
           owner: { columns: { id: true, displayName: true, pictureUrl: true } },
           episode: { columns: { id: true, episodeNo: true, name: true } },
           project: { columns: { id: true, name: true } },
-          publishedPosts: { columns: { id: true, platform: true } },
         },
         limit,
         offset,

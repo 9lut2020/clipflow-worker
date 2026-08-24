@@ -11,6 +11,7 @@ import {
 import { adminOnly } from "../middleware/role";
 import { NotificationService } from "../services/notifications/notification.service";
 import { ProjectService } from "../services/project.service";
+import { logActivity } from "../services/activity-logger";
 import { zValidator } from "@hono/zod-validator";
 import {
   ProjectCreateSchema,
@@ -53,9 +54,19 @@ projects.post(
   async (c: any) => {
     const db = c.get("db");
     const body = c.req.valid("json");
+    const actorId = c.get("user")?.id || null;
     const service = new ProjectService(db);
 
-    const newProject = await service.createProject(body.name, body.description);
+    const newProject = await service.createProject(body.name, body.description, body.pictureUrl);
+
+    await logActivity({
+      db,
+      actorId,
+      action: "PROJECT_CREATED",
+      entityType: "project",
+      entityId: newProject.id,
+      meta: { projectName: newProject.name },
+    }).catch(() => {});
 
     return c.json(
       {
@@ -95,7 +106,7 @@ projects.get("/:id", async (c: any) => {
 
 /**
  * PATCH /projects/:id
- * ADMIN — update project name/description/status
+ * ADMIN — update project name/description/status/pictureUrl
  */
 projects.patch(
   "/:id",
@@ -105,11 +116,13 @@ projects.patch(
     const db = c.get("db");
     const id = c.req.param("id") as string;
     const body = c.req.valid("json");
+    const actorId = c.get("user")?.id || null;
     const service = new ProjectService(db);
 
     const updated = await service.updateProject(id, {
       name: body.name,
       description: body.description,
+      pictureUrl: body.pictureUrl,
       isActive: body.isActive,
     });
 
@@ -119,6 +132,15 @@ projects.patch(
         404,
       );
     }
+
+    await logActivity({
+      db,
+      actorId,
+      action: "PROJECT_UPDATED",
+      entityType: "project",
+      entityId: id,
+      meta: { projectName: updated.name },
+    }).catch(() => {});
 
     return c.json({
       status: "success",
@@ -135,6 +157,7 @@ projects.patch(
 projects.delete("/:id", adminOnly, async (c: any) => {
   const db = c.get("db");
   const id = c.req.param("id") as string;
+  const actorId = c.get("user")?.id || null;
   const service = new ProjectService(db);
 
   const updated = await service.deleteProject(id);
@@ -145,6 +168,15 @@ projects.delete("/:id", adminOnly, async (c: any) => {
       404,
     );
   }
+
+  await logActivity({
+    db,
+    actorId,
+    action: "PROJECT_DELETED",
+    entityType: "project",
+    entityId: id,
+    meta: { projectName: updated.name },
+  }).catch(() => {});
 
   return c.json({
     status: "success",
@@ -206,6 +238,7 @@ projects.get("/:id/clips", async (c: any) => {
       data,
     });
   } catch (error: any) {
+    if (error.message?.includes("Forbidden")) {
       return c.json(
         { status: "error", message: error.message, data: null },
         403,
@@ -238,7 +271,7 @@ projects.post(
 
     try {
       const { episodes } = await import("@clipflow/db");
-      
+
       const [newEpisode] = await db
         .insert(episodes)
         .values({
@@ -249,21 +282,32 @@ projects.post(
         .returning();
 
       return c.json(
-        { status: "success", message: "Episode created successfully", data: newEpisode },
-        201
+        {
+          status: "success",
+          message: "Episode created successfully",
+          data: newEpisode,
+        },
+        201,
       );
     } catch (error: any) {
       console.error("Failed to create episode:", error);
       // Handle unique constraint violation on project_id + episode_no (if any)
-      if (error.code === '23505') {
-         return c.json({ status: "error", message: "Episode number already exists", data: null }, 409);
+      if (error.code === "23505") {
+        return c.json(
+          {
+            status: "error",
+            message: "Episode number already exists",
+            data: null,
+          },
+          409,
+        );
       }
       return c.json(
         { status: "error", message: "Failed to create episode", data: null },
-        500
+        500,
       );
     }
-  }
+  },
 );
 
 /**
@@ -463,6 +507,17 @@ projects.post(
         }
       }
 
+      // Log batch save
+      const actorId = c.get("user")?.id || null;
+      await logActivity({
+        db,
+        actorId,
+        action: "CLIP_BATCH_SAVED",
+        entityType: "project",
+        entityId: projectId,
+        meta: { projectName: projectObj?.name, clipCount: clips.length },
+      }).catch(() => {});
+
       return c.json({
         status: "success",
         message: "Clips batch updated successfully",
@@ -503,13 +558,29 @@ projects.get("/:id/members", async (c) => {
 projects.post(
   "/:id/members",
   zValidator("json", z.object({ userId: z.string().uuid() })),
-  async (c) => {
+  async (c: any) => {
     const db = c.get("db");
     const projectId = c.req.param("id");
     const { userId } = c.req.valid("json");
+    const actorId = c.get("user")?.id || null;
     const service = new ProjectService(db);
 
     const result = await service.addProjectMember(projectId, userId);
+
+    // Look up target user name for the log
+    const targetUser = await db.query.users.findFirst({
+      where: (u: any, { eq: eqFn }: any) => eqFn(u.id, userId),
+      columns: { displayName: true },
+    }).catch(() => null);
+
+    await logActivity({
+      db,
+      actorId,
+      action: "MEMBER_ADDED",
+      entityType: "project",
+      entityId: projectId,
+      meta: { targetName: targetUser?.displayName, userId },
+    }).catch(() => {});
 
     return c.json({
       status: "success",
@@ -523,13 +594,29 @@ projects.post(
  * DELETE /projects/:id/members/:userId
  * Remove a member from a project
  */
-projects.delete("/:id/members/:userId", async (c) => {
+projects.delete("/:id/members/:userId", async (c: any) => {
   const db = c.get("db");
   const projectId = c.req.param("id");
   const userId = c.req.param("userId");
+  const actorId = c.get("user")?.id || null;
   const service = new ProjectService(db);
 
+  // Look up target user name before deleting
+  const targetUser = await db.query.users.findFirst({
+    where: (u: any, { eq: eqFn }: any) => eqFn(u.id, userId),
+    columns: { displayName: true },
+  }).catch(() => null);
+
   await service.removeProjectMember(projectId, userId);
+
+  await logActivity({
+    db,
+    actorId,
+    action: "MEMBER_REMOVED",
+    entityType: "project",
+    entityId: projectId,
+    meta: { targetName: targetUser?.displayName, userId },
+  }).catch(() => {});
 
   return c.json({
     status: "success",

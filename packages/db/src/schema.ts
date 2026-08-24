@@ -109,6 +109,7 @@ export const projects = pgTable("projects", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
+  pictureUrl: varchar("picture_url", { length: 1024 }),
   isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()

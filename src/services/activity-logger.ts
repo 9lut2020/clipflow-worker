@@ -10,10 +10,19 @@ export type ActivityAction =
   | "CLIP_RESUBMITTED"
   | "CLIP_APPROVED"
   | "CLIP_REJECTED"
+  | "CLIP_DELETED"
+  | "CLIP_BATCH_SAVED"
   | "TASK_ASSIGNED"
   | "ROLE_CHANGED"
   | "STATUS_CHANGED"
-  | "PROJECT_CREATED";
+  | "PROJECT_CREATED"
+  | "PROJECT_UPDATED"
+  | "PROJECT_DELETED"
+  | "EPISODE_CREATED"
+  | "EPISODE_UPDATED"
+  | "EPISODE_DELETED"
+  | "MEMBER_ADDED"
+  | "MEMBER_REMOVED";
 
 interface LogActivityParams {
   db: any; // Accepts either global db or tx instance
