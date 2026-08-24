@@ -151,7 +151,7 @@ app.post("/webhook/line", async (c: any) => {
 
         // 2. Registered User Commands
         if (user.lineUserId) {
-          linkUserRichMenu(user.lineUserId, "richmenu-4e94d7ae345bcc1acebbcc2dbe1e0a6c", token).catch((err) => {
+          linkUserRichMenu(user.lineUserId, "richmenu-a719d2f87e69f0eaa3167da5004fcb8a", token).catch((err) => {
             console.error("[LINE LINK EDITOR RICHMENU WEBHOOK ERROR]", err);
           });
         }
