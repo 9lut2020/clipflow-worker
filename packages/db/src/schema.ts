@@ -168,6 +168,7 @@ export const clips = pgTable("clips", {
   status: clipStatusEnum("status").default("DRAFT").notNull(),
   platform: varchar("platform", { length: 50 }).default("TIKTOK").notNull(),
   deadline: timestamp("deadline", { withTimezone: true }),
+  scheduledPublishAt: timestamp("scheduled_publish_at", { withTimezone: true }),
   currentRevisionId: uuid("current_revision_id"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()

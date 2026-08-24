@@ -60,3 +60,7 @@ export const ReviewSubmitSchema = z.object({
   timecodeStr: z.string().optional().nullable(),
   reviewerId: z.string().optional(),
 });
+
+export const ClipScheduleSchema = z.object({
+  scheduledPublishAt: z.string().optional().nullable(),
+});

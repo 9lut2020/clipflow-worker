@@ -3,7 +3,7 @@ import { createDb } from "@clipflow/db";
 import { ClipService } from "../services/clip.service";
 import { RevisionService } from "../services/revision.service";
 import { zValidator } from "@hono/zod-validator";
-import { ClipSubmitRevisionSchema } from "@clipflow/validations";
+import { ClipSubmitRevisionSchema, ClipScheduleSchema } from "@clipflow/validations";
 import { logActivity } from "../services/activity-logger";
 // Static imports — avoids re-loading on every request
 import { eq, desc } from "drizzle-orm";
@@ -71,6 +71,68 @@ clips.get("/:id", async (c: Context) => {
     data: clip,
   });
 });
+
+/**
+ * PATCH /clips/:id/schedule
+ * Admin / Reviewer - Schedule publication date for a clip
+ */
+clips.patch(
+  "/:id/schedule",
+  zValidator("json", ClipScheduleSchema),
+  async (c: Context) => {
+    const db = c.get("db");
+    const id = c.req.param("id") as string;
+    const body = c.req.valid("json");
+    const actorId = c.get("user")?.id || null;
+
+    try {
+      const scheduledPublishAt = body.scheduledPublishAt 
+        ? new Date(body.scheduledPublishAt) 
+        : null;
+
+      const [updated] = await db
+        .update(clipsTable)
+        .set({ 
+          scheduledPublishAt,
+          updatedAt: new Date()
+        })
+        .where(eq(clipsTable.id, id))
+        .returning();
+
+      if (!updated) {
+        return c.json(
+          { status: "error", message: "Clip not found", data: null },
+          404,
+        );
+      }
+
+      // Log activity
+      await logActivity({
+        db,
+        actorId,
+        action: "CLIP_SCHEDULED",
+        entityType: "clip",
+        entityId: id,
+        meta: { 
+          clipName: updated.name,
+          scheduledPublishAt: updated.scheduledPublishAt
+        },
+      }).catch(() => {});
+
+      return c.json({
+        status: "success",
+        message: "Clip schedule updated successfully",
+        data: updated,
+      });
+    } catch (error: any) {
+      console.error("Failed to update clip schedule:", error);
+      return c.json(
+        { status: "error", message: error.message || "Failed to update schedule", data: null },
+        500,
+      );
+    }
+  }
+);
 
 /**
  * GET /clips/:id/revisions
