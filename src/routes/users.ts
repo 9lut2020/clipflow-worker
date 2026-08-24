@@ -9,6 +9,7 @@ import { adminOnly } from "../middleware/role";
 import { NotificationService } from "../services/notifications/notification.service";
 import { notifyReviewerRoleGranted } from "../services/notifications/line/flex-templates";
 import { UserService } from "../services/user.service";
+import { linkUserRichMenu } from "../services/notifications/line/line.client";
 import { zValidator } from "@hono/zod-validator";
 import { UserSyncSchema, UserRoleUpdateSchema, UserStatusUpdateSchema, UserProfileUpdateSchema } from "@clipflow/validations";
 
@@ -125,6 +126,25 @@ users.post("/sync", zValidator("json", UserSyncSchema), async (c) => {
       }
     } catch (err) {
       console.error("[LINE NOTIFY LOGIN ERROR]", err);
+    }
+  }
+
+  // Link Menu-Editor Richmenu to User on successful sync/login
+  if (user.lineUserId) {
+    try {
+      const token = (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN;
+      const promise = linkUserRichMenu(
+        user.lineUserId,
+        "richmenu-eecdcd78d9f5b0a1a6497d0ca641d607",
+        token
+      );
+      if (c.executionCtx?.waitUntil) {
+        c.executionCtx.waitUntil(promise);
+      } else {
+        promise.catch(() => {});
+      }
+    } catch (err) {
+      console.error("[LINE LINK RICHMENU ERROR]", err);
     }
   }
 

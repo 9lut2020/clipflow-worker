@@ -131,3 +131,46 @@ export async function sendLinePushFlexMessage({
     return { success: false, message: err?.message || "LINE Flex Push failed" };
   }
 }
+
+/**
+ * Link a specific Rich Menu to a LINE User
+ */
+export async function linkUserRichMenu(
+  lineUserId: string,
+  richMenuId: string,
+  channelAccessToken?: string
+): Promise<{ success: boolean; message: string }> {
+  if (!lineUserId || !richMenuId) {
+    return { success: false, message: "Missing lineUserId or richMenuId" };
+  }
+
+  const token = channelAccessToken || process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!token) {
+    console.log(`[LINE RICHMENU SIMULATION] Link User: ${lineUserId} -> Menu: ${richMenuId}`);
+    return {
+      success: true,
+      message: `[LINE RICHMENU SIMULATION] Linked ${richMenuId} to ${lineUserId}`,
+    };
+  }
+
+  try {
+    const res = await fetch(`https://api.line.me/v2/bot/user/${lineUserId}/richmenu/${richMenuId}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      console.error("[LINE RICHMENU API ERROR]", res.status, errBody);
+      return { success: false, message: `LINE Richmenu API error: ${res.statusText}` };
+    }
+
+    return { success: true, message: "Richmenu linked successfully" };
+  } catch (err: any) {
+    console.error("[LINE RICHMENU EXCEPTION]", err);
+    return { success: false, message: err?.message || "LINE Richmenu Link failed" };
+  }
+}
+
