@@ -150,6 +150,11 @@ app.post("/webhook/line", async (c: any) => {
         }
 
         // 2. Registered User Commands
+        if (user.lineUserId) {
+          linkUserRichMenu(user.lineUserId, "richmenu-eecdcd78d9f5b0a1a6497d0ca641d607", token).catch((err) => {
+            console.error("[LINE LINK EDITOR RICHMENU WEBHOOK ERROR]", err);
+          });
+        }
         if (userMsg === "งานของฉัน") {
           const myClips = await db.query.clips.findMany({
             where: (clips: any, { eq, and, ne }: any) => 
