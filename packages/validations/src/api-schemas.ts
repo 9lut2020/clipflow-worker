@@ -24,11 +24,13 @@ export const ClipBatchCreateSchema = z.object({
 export const ProjectCreateSchema = z.object({
   name: z.string().min(1, "Name is required"),
   description: z.string().optional().nullable(),
+  pictureUrl: z.string().url("Must be a valid URL").optional().or(z.literal("")).nullable(),
 });
 
 export const ProjectUpdateSchema = z.object({
   name: z.string().optional(),
   description: z.string().optional().nullable(),
+  pictureUrl: z.string().url("Must be a valid URL").optional().or(z.literal("")).nullable(),
   isActive: z.boolean().optional(),
 });
 

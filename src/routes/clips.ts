@@ -2,9 +2,12 @@ import { Hono, type Context } from "hono";
 import { createDb } from "@clipflow/db";
 import { ClipService } from "../services/clip.service";
 import { RevisionService } from "../services/revision.service";
-
 import { zValidator } from "@hono/zod-validator";
 import { ClipSubmitRevisionSchema } from "@clipflow/validations";
+import { logActivity } from "../services/activity-logger";
+// Static imports — avoids re-loading on every request
+import { eq, desc } from "drizzle-orm";
+import { clips as clipsTable, publishedPosts, users } from "@clipflow/db";
 
 export const clips = new Hono<{
   Bindings: { DATABASE_URL: string };
@@ -22,7 +25,7 @@ clips.get("/", async (c: Context) => {
   const statusParam = c.req.query("status");
   const status = statusParam?.includes(",") ? statusParam.split(",") : statusParam;
   const excludeApproved = c.req.query("excludeApproved") === "true";
-  
+
   const limitStr = c.req.query("limit");
   const offsetStr = c.req.query("offset");
   const limit = limitStr ? parseInt(limitStr, 10) : undefined;
@@ -101,7 +104,6 @@ clips.post("/:id/revisions", zValidator("json", ClipSubmitRevisionSchema), async
   }
 
   const { driveUrl, submitNote, submittedBy } = c.req.valid("json");
-
   const userId = c.get("user")?.id || submittedBy || "unknown";
 
   try {
@@ -143,17 +145,14 @@ clips.post("/:id/revisions", zValidator("json", ClipSubmitRevisionSchema), async
 clips.delete("/:id", async (c: Context) => {
   const db = c.get("db");
   const id = c.req.param("id") as string;
-  
+
   try {
-    const { eq } = await import("drizzle-orm");
-    const { clips: clipsTable } = await import("@clipflow/db");
-    
     const result = await db.delete(clipsTable).where(eq(clipsTable.id, id)).returning();
-    
+
     if (result.length === 0) {
       return c.json({ status: "error", message: "Clip not found or already deleted", data: null }, 404);
     }
-    
+
     return c.json({ status: "success", message: "Clip deleted successfully", data: result[0] });
   } catch (err: any) {
     console.error("Failed to delete clip:", err);
@@ -168,11 +167,8 @@ clips.delete("/:id", async (c: Context) => {
 clips.get("/:id/published-posts", async (c: Context) => {
   const db = c.get("db");
   const clipId = c.req.param("id") as string;
-  
+
   try {
-    const { eq, desc } = await import("drizzle-orm");
-    const { publishedPosts, users } = await import("@clipflow/db");
-    
     const posts = await db.select({
       id: publishedPosts.id,
       clipId: publishedPosts.clipId,
@@ -186,7 +182,7 @@ clips.get("/:id/published-posts", async (c: Context) => {
     .leftJoin(users, eq(publishedPosts.publishedBy, users.id))
     .where(eq(publishedPosts.clipId, clipId))
     .orderBy(desc(publishedPosts.publishedAt));
-    
+
     return c.json({ status: "success", message: "Published posts retrieved", data: posts });
   } catch (err: any) {
     console.error("Failed to fetch published posts:", err);
@@ -201,19 +197,16 @@ clips.get("/:id/published-posts", async (c: Context) => {
 clips.post("/:id/publish", async (c: Context) => {
   const db = c.get("db");
   const clipId = c.req.param("id") as string;
-  
+
   try {
     const body = await c.req.json();
     const { platform, caption, url, publishedAt, publishedBy } = body;
-    
+
     const userId = c.get("user")?.id || publishedBy;
     if (!userId) {
       return c.json({ status: "error", message: "User ID required", data: null }, 401);
     }
-    
-    const { publishedPosts, clips: clipsTable } = await import("@clipflow/db");
-    const { eq } = await import("drizzle-orm");
-    
+
     // 1. Insert published post record
     const result = await db.insert(publishedPosts).values({
       clipId,
@@ -223,12 +216,12 @@ clips.post("/:id/publish", async (c: Context) => {
       publishedAt: publishedAt ? new Date(publishedAt) : new Date(),
       publishedBy: userId,
     }).returning();
-    
+
     // 2. Update clip status to PUBLISHED
     await db.update(clipsTable)
       .set({ status: "PUBLISHED", updatedAt: new Date() })
       .where(eq(clipsTable.id, clipId));
-      
+
     return c.json({ status: "success", message: "Recorded published post", data: result[0] }, 201);
   } catch (err: any) {
     console.error("Failed to record publish:", err);

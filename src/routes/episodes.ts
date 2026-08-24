@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { eq } from "drizzle-orm"
 import { createDb, episodes as episodesSchema } from "@clipflow/db"
 import { adminOnly } from "../middleware/role"
+import { logActivity } from "../services/activity-logger"
 
 export const episodes = new Hono<{
   Bindings: { DATABASE_URL: string }
@@ -54,10 +55,11 @@ episodes.get("/:id", async (c) => {
  * POST /episodes
  * ADMIN — create an episode under a project
  */
-episodes.post("/", adminOnly, async (c) => {
+episodes.post("/", adminOnly, async (c: any) => {
   const db = c.get("db")
   const body = await c.req.json()
   const { projectId, episodeNo, name } = body
+  const actorId = c.get("user")?.id || null
 
   if (!projectId || !episodeNo) {
     return c.json(
@@ -71,6 +73,15 @@ episodes.post("/", adminOnly, async (c) => {
     .values({ projectId, episodeNo: Number(episodeNo), name: name || null })
     .returning()
 
+  await logActivity({
+    db,
+    actorId,
+    action: "EPISODE_CREATED",
+    entityType: "project",
+    entityId: projectId,
+    meta: { episodeNo: newEpisode.episodeNo, episodeName: name || null },
+  }).catch(() => {})
+
   return c.json({ status: "success", message: "Episode created successfully", data: newEpisode }, 201)
 })
 
@@ -78,10 +89,11 @@ episodes.post("/", adminOnly, async (c) => {
  * PATCH /episodes/:id
  * ADMIN — update episode name or episodeNo
  */
-episodes.patch("/:id", adminOnly, async (c) => {
+episodes.patch("/:id", adminOnly, async (c: any) => {
   const db = c.get("db")
   const id = c.req.param("id") as string
   const body = await c.req.json()
+  const actorId = c.get("user")?.id || null
 
   const updated = await db
     .update(episodesSchema)
@@ -96,6 +108,15 @@ episodes.patch("/:id", adminOnly, async (c) => {
     return c.json({ status: "error", message: "Episode not found", data: null }, 404)
   }
 
+  await logActivity({
+    db,
+    actorId,
+    action: "EPISODE_UPDATED",
+    entityType: "project",
+    entityId: updated[0].projectId,
+    meta: { episodeNo: updated[0].episodeNo, episodeName: updated[0].name },
+  }).catch(() => {})
+
   return c.json({ status: "success", message: "Episode updated successfully", data: updated[0] })
 })
 
@@ -103,9 +124,10 @@ episodes.patch("/:id", adminOnly, async (c) => {
  * DELETE /episodes/:id
  * ADMIN — soft delete (set isActive: false)
  */
-episodes.delete("/:id", adminOnly, async (c) => {
+episodes.delete("/:id", adminOnly, async (c: any) => {
   const db = c.get("db")
   const id = c.req.param("id") as string
+  const actorId = c.get("user")?.id || null
 
   const updated = await db
     .update(episodesSchema)
@@ -116,6 +138,15 @@ episodes.delete("/:id", adminOnly, async (c) => {
   if (updated.length === 0) {
     return c.json({ status: "error", message: "Episode not found", data: null }, 404)
   }
+
+  await logActivity({
+    db,
+    actorId,
+    action: "EPISODE_DELETED",
+    entityType: "project",
+    entityId: updated[0].projectId,
+    meta: { episodeNo: updated[0].episodeNo },
+  }).catch(() => {})
 
   return c.json({ status: "success", message: "Episode deleted successfully", data: null })
 })

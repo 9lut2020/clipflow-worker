@@ -1,4 +1,4 @@
-import { eq, inArray, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import {
   createDb,
   projects as projectsSchema,
@@ -14,26 +14,36 @@ export class ProjectService {
 
   /**
    * Retrieves all projects the user is authorized to see.
+   * Uses a single join query for USER role instead of two sequential queries.
    */
   async listProjects(user: User) {
-    let projectIdsFilter = undefined;
+    const conditions = [eq(projectsSchema.isActive, true)];
 
     if (user.role === "USER") {
-      const userProjs = await this.db.query.userProjects.findMany({
-        where: eq(userProjectsSchema.userId, user.id),
-        columns: { projectId: true },
-      });
-      const ids = userProjs.map((up: any) => up.projectId);
-
-      if (ids.length === 0) {
-        return [];
-      }
-      projectIdsFilter = inArray(projectsSchema.id, ids);
+      // Single join query: projects → userProjects filtered by userId
+      return await this.db
+        .select({
+          id: projectsSchema.id,
+          name: projectsSchema.name,
+          description: projectsSchema.description,
+          pictureUrl: projectsSchema.pictureUrl,
+          isActive: projectsSchema.isActive,
+          createdAt: projectsSchema.createdAt,
+          updatedAt: projectsSchema.updatedAt,
+        })
+        .from(projectsSchema)
+        .innerJoin(
+          userProjectsSchema,
+          and(
+            eq(userProjectsSchema.projectId, projectsSchema.id),
+            eq(userProjectsSchema.userId, user.id),
+          ),
+        )
+        .where(eq(projectsSchema.isActive, true))
+        .orderBy((projectsSchema as any).createdAt);
     }
 
-    const conditions = [eq(projectsSchema.isActive, true)];
-    if (projectIdsFilter) conditions.push(projectIdsFilter);
-
+    // ADMIN / REVIEWER: fetch all active projects
     return await this.db.query.projects.findMany({
       where: and(...conditions),
       orderBy: (p: any, { desc }: any) => [desc(p.createdAt)],
@@ -43,10 +53,10 @@ export class ProjectService {
   /**
    * Create a new project
    */
-  async createProject(name: string, description: string | null = null) {
+  async createProject(name: string, description: string | null = null, pictureUrl: string | null = null) {
     const [newProject] = await this.db
       .insert(projectsSchema)
-      .values({ name, description })
+      .values({ name, description, pictureUrl })
       .returning();
     return newProject;
   }
@@ -59,6 +69,7 @@ export class ProjectService {
       where: (p: any, { eq }: any) => eq(p.id, id),
       with: {
         episodes: {
+          where: (ep: any, { eq }: any) => eq(ep.isActive, true),
           orderBy: (ep: any, { asc }: any) => [asc(ep.episodeNo)],
         },
       },
@@ -70,7 +81,7 @@ export class ProjectService {
    */
   async updateProject(
     id: string,
-    updates: { name?: string; description?: string; isActive?: boolean }
+    updates: { name?: string; description?: string | null; pictureUrl?: string | null; isActive?: boolean }
   ) {
     const updated = await this.db
       .update(projectsSchema)
@@ -95,6 +106,7 @@ export class ProjectService {
       where: (p: any, { eq }: any) => eq(p.id, id),
       with: {
         episodes: {
+          where: (ep: any, { eq }: any) => eq(ep.isActive, true),
           with: {
             clips: {
               with: {
