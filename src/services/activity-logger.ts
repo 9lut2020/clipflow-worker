@@ -12,6 +12,7 @@ export type ActivityAction =
   | "CLIP_REJECTED"
   | "CLIP_DELETED"
   | "CLIP_BATCH_SAVED"
+  | "CLIP_SCHEDULED"
   | "TASK_ASSIGNED"
   | "ROLE_CHANGED"
   | "STATUS_CHANGED"
