@@ -1240,7 +1240,10 @@ export async function notifyAdminGroupNewSubmission({
   channelAccessToken?: string;
   adminGroupId?: string;
 }) {
-  const targetId = adminGroupId || (process.env as any)?.LINE_REVIEWER_GROUP_ID;
+  const targetId =
+    adminGroupId ||
+    (process.env as any)?.LINE_ADMIN_GROUP_ID ||
+    (process.env as any)?.LINE_REVIEWER_GROUP_ID;
 
   if (!targetId) {
     console.warn(

@@ -8,10 +8,15 @@ import {
   notifySubmissionPending,
   notifyTaskAssigned,
   notifyTasksAssigned,
+  notifyAdminGroupNewSubmission,
 } from "../services/notifications/line/flex-templates";
 
 export const notifications = new Hono<{
-  Bindings: { DATABASE_URL: string; LINE_CHANNEL_ACCESS_TOKEN?: string };
+  Bindings: {
+    DATABASE_URL: string;
+    LINE_CHANNEL_ACCESS_TOKEN?: string;
+    LINE_ADMIN_GROUP_ID?: string;
+  };
   Variables: { db: ReturnType<typeof createDb> };
 }>();
 
@@ -210,6 +215,16 @@ notifications.post("/test-line", async (c) => {
         body.submitNote || "ปรับแก้สีและเสียงตามที่ผู้ตรวจระบุเรียบร้อยครับ",
       clipId: body.clipId || "demo-clip-id",
       channelAccessToken: token,
+    });
+  } else if (type === "GROUP_SUBMIT") {
+    result = await notifyAdminGroupNewSubmission({
+      clipName: body.clipName || "คลิปวิดีโอเปิดตัวสินค้า EP.1 (ส่งกลุ่มผู้ตรวจ)",
+      projectName: body.projectName || "TikTok Marketing Campaign",
+      editorName: body.editorName || "Editor (คนทำคลิป)",
+      submitNote: body.submitNote || "ส่งตรวจคลิปงานแก้ไขเรียบร้อยในแชทกลุ่มผู้ตรวจ",
+      clipId: body.clipId || "demo-clip-id",
+      channelAccessToken: token,
+      adminGroupId: c.env.LINE_ADMIN_GROUP_ID,
     });
   } else {
     // Default: NEEDS_REVISION

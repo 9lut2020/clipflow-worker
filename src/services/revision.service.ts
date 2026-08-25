@@ -42,6 +42,7 @@ export const RevisionService = {
     submitNote,
     userId,
     channelAccessToken,
+    adminGroupId,
     executionCtx,
   }: {
     db: any;
@@ -50,6 +51,7 @@ export const RevisionService = {
     submitNote?: string;
     userId: string;
     channelAccessToken?: string;
+    adminGroupId?: string;
     executionCtx?: any;
   }) {
     // We can do pre-reads outside the transaction to reduce lock time
@@ -127,6 +129,7 @@ export const RevisionService = {
           submitNote,
           clipId,
           channelAccessToken,
+          adminGroupId,
         };
       }
     });
