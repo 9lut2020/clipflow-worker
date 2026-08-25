@@ -68,7 +68,11 @@ export const activityLogs = pgTable("activity_logs", {
   entityId: uuid("entity_id").notNull(),
   meta: text("meta"), // JSON string: { clipName, oldStatus, newStatus, ... }
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (table) => ({
+  actorIdIdx: index("idx_activity_logs_actor_id").on(table.actorId),
+  entityIdIdx: index("idx_activity_logs_entity_id").on(table.entityId),
+  createdAtIdx: index("idx_activity_logs_created_at").on(table.createdAt),
+}));
 
 export const auditLogs = pgTable("audit_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -134,7 +138,9 @@ export const episodes = pgTable("episodes", {
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => ({
+  projectIdIdx: index("idx_episodes_project_id").on(table.projectId),
+}));
 
 export const userProjects = pgTable("user_projects", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -147,7 +153,10 @@ export const userProjects = pgTable("user_projects", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => ({
+  userIdIdx: index("idx_user_projects_user_id").on(table.userId),
+  projectIdIdx: index("idx_user_projects_project_id").on(table.projectId),
+}));
 
 export const clips = pgTable("clips", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -176,7 +185,13 @@ export const clips = pgTable("clips", {
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => ({
+  projectIdIdx: index("idx_clips_project_id").on(table.projectId),
+  episodeIdIdx: index("idx_clips_episode_id").on(table.episodeId),
+  ownerIdIdx: index("idx_clips_owner_id").on(table.ownerId),
+  statusIdx: index("idx_clips_status").on(table.status),
+  createdAtIdx: index("idx_clips_created_at").on(table.createdAt),
+}));
 
 export const revisions = pgTable("revisions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -196,7 +211,11 @@ export const revisions = pgTable("revisions", {
   submittedAt: timestamp("submitted_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => ({
+  clipIdIdx: index("idx_revisions_clip_id").on(table.clipId),
+  submittedByIdx: index("idx_revisions_submitted_by").on(table.submittedBy),
+  submittedAtIdx: index("idx_revisions_submitted_at").on(table.submittedAt),
+}));
 
 export const reviews = pgTable("reviews", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -216,7 +235,12 @@ export const reviews = pgTable("reviews", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => ({
+  clipIdIdx: index("idx_reviews_clip_id").on(table.clipId),
+  revisionIdIdx: index("idx_reviews_revision_id").on(table.revisionId),
+  reviewerIdIdx: index("idx_reviews_reviewer_id").on(table.reviewerId),
+  createdAtIdx: index("idx_reviews_created_at").on(table.createdAt),
+}));
 
 export const rawEvents = pgTable("raw_events", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -257,7 +281,10 @@ export const publishedPosts = pgTable("published_posts", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => ({
+  clipIdIdx: index("idx_published_posts_clip_id").on(table.clipId),
+  publishedByIdx: index("idx_published_posts_published_by").on(table.publishedBy),
+}));
 
 // Relations with proper Drizzle helper inference
 export const usersRelations = relations(users, (helpers) => ({
@@ -364,7 +391,10 @@ export const notifications = pgTable("notifications", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
-});
+}, (table) => ({
+  userIdIdx: index("idx_notifications_user_id").on(table.userId),
+  createdAtIdx: index("idx_notifications_created_at").on(table.createdAt),
+}));
 
 export const notificationsRelations = relations(notifications, (helpers) => ({
   user: helpers.one(users, {

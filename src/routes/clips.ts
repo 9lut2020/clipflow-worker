@@ -176,6 +176,7 @@ clips.post("/:id/revisions", zValidator("json", ClipSubmitRevisionSchema), async
       submitNote,
       userId,
       channelAccessToken: (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN,
+      adminGroupId: (c.env as any)?.LINE_ADMIN_GROUP_ID,
       executionCtx: c.executionCtx,
     });
 
