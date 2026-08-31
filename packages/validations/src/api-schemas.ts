@@ -64,3 +64,12 @@ export const ReviewSubmitSchema = z.object({
 export const ClipScheduleSchema = z.object({
   scheduledPublishAt: z.string().optional().nullable(),
 });
+
+export const ClipFastSubmitSchema = z.object({
+  projectId: z.string().uuid("Invalid project ID"),
+  episodeId: z.string().uuid("Invalid episode ID"),
+  name: z.string().min(1, "Name is required"),
+  driveUrl: z.string().url("Must be a valid URL").optional(),
+  submitNote: z.string().optional(),
+});
+
