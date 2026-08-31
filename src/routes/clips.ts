@@ -3,7 +3,7 @@ import { createDb } from "@clipflow/db";
 import { ClipService } from "../services/clip.service";
 import { RevisionService } from "../services/revision.service";
 import { zValidator } from "@hono/zod-validator";
-import { ClipSubmitRevisionSchema, ClipScheduleSchema } from "@clipflow/validations";
+import { ClipSubmitRevisionSchema, ClipScheduleSchema, ClipFastSubmitSchema } from "@clipflow/validations";
 import { logActivity } from "../services/activity-logger";
 // Static imports — avoids re-loading on every request
 import { eq, desc } from "drizzle-orm";
@@ -152,6 +152,65 @@ clips.get("/:id/revisions", async (c: Context) => {
 });
 
 /**
+ * POST /clips/fast-submit
+ * One-click submit: Create clip and Revision 1 immediately.
+ */
+clips.post("/fast-submit", zValidator("json", ClipFastSubmitSchema), async (c) => {
+  const db = c.get("db");
+  const { projectId, episodeId, name, driveUrl, submitNote } = c.req.valid("json");
+  const userId = c.get("user")?.id;
+  if (!userId) {
+    return c.json({ status: "error", message: "Unauthorized", data: null }, 401);
+  }
+
+  try {
+    // 1. Create the clip
+    const [newClip] = await db
+      .insert(clipsTable)
+      .values({
+        projectId,
+        episodeId,
+        name,
+        ownerId: userId,
+        createdBy: userId,
+        status: "DRAFT",
+      })
+      .returning();
+
+    // 2. Submit Revision 1 using existing logic
+    const newRev = await RevisionService.submitRevision({
+      db,
+      clipId: newClip.id,
+      driveUrl,
+      submitNote,
+      userId,
+      channelAccessToken: (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN,
+      adminGroupId: (c.env as any)?.LINE_ADMIN_GROUP_ID,
+      executionCtx: c.executionCtx,
+    });
+
+    return c.json(
+      {
+        status: "success",
+        message: "Clip created and revision submitted successfully",
+        data: { clip: newClip, revision: newRev },
+      },
+      201,
+    );
+  } catch (err: any) {
+    console.error("Failed to fast-submit:", err);
+    return c.json(
+      {
+        status: "error",
+        message: err?.message || "Failed to fast-submit",
+        data: null,
+      },
+      500,
+    );
+  }
+});
+
+/**
  * POST /clips/:id/revisions
  * Submit a new revision for a clip (Editor/User or Admin)
  */
@@ -165,8 +224,13 @@ clips.post("/:id/revisions", zValidator("json", ClipSubmitRevisionSchema), async
     );
   }
 
-  const { driveUrl, submitNote, submittedBy } = c.req.valid("json");
-  const userId = c.get("user")?.id || submittedBy || "unknown";
+  const { driveUrl, submitNote } = c.req.valid("json");
+  // The actor must come from the authenticated request, never from a browser
+  // supplied submittedBy field.
+  const userId = c.get("user")?.id;
+  if (!userId) {
+    return c.json({ status: "error", message: "Unauthorized", data: null }, 401);
+  }
 
   try {
     const newRev = await RevisionService.submitRevision({

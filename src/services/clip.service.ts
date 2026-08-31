@@ -53,6 +53,19 @@ export const ClipService = {
           episode: { columns: { id: true, episodeNo: true, name: true } },
           project: { columns: { id: true, name: true } },
           publishedPosts: true,
+          currentRevision: {
+            columns: { id: true, driveUrl: true, revisionNo: true },
+            with: {
+              reviews: {
+                columns: { id: true, status: true, comment: true, createdAt: true },
+                with: {
+                  reviewer: { columns: { id: true, displayName: true, pictureUrl: true } },
+                },
+                orderBy: (r: any, { desc }: any) => [desc(r.createdAt)],
+                limit: 1,
+              },
+            },
+          },
         },
         limit,
         offset,

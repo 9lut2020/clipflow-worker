@@ -65,7 +65,10 @@ revisions.get("/:id/reviews", async (c: Context) => {
 revisions.post("/:id/reviews", reviewerOrAdmin, zValidator("json", ReviewSubmitSchema), async (c) => {
   const db = c.get("db");
   const targetId = c.req.param("id") as string;
-  const { status, comment, reviewerId, timecodeSeconds, timecodeStr } = c.req.valid("json");
+  const { status, comment, timecodeSeconds, timecodeStr } = c.req.valid("json");
+  // Never trust an identity supplied by the browser. The authenticated
+  // reviewer is the only actor allowed to create this review.
+  const reviewerId = c.get("user")?.id;
 
   if (!status || !reviewerId) {
     return c.json(
