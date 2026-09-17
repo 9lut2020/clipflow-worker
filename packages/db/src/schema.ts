@@ -10,10 +10,13 @@ import {
   pgEnum,
   jsonb,
   date,
+  time,
   numeric,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 
 export const userRoleEnum = pgEnum("user_role", ["USER", "REVIEWER", "ADMIN"]);
 
@@ -204,6 +207,30 @@ export const clips = pgTable("clips", {
   createdAtIdx: index("idx_clips_created_at").on(table.createdAt),
 }));
 
+export const publishScheduleStatusEnum = pgEnum("publish_schedule_status", [
+  "SCHEDULED",
+  "PUBLISHED",
+  "CANCELLED",
+]);
+
+export const clipPublishSchedules = pgTable("clip_publish_schedules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }).notNull(),
+  clipId: uuid("clip_id").references(() => clips.id, { onDelete: "cascade" }).notNull().unique(),
+  publishDate: date("publish_date").notNull(),
+  publishTime: time("publish_time").notNull(),
+  status: publishScheduleStatusEnum("status").default("SCHEDULED").notNull(),
+  isRepeat: boolean("is_repeat").default(false).notNull(),
+  note: text("note"),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  projectDateIdx: index("idx_clip_publish_schedules_project_date").on(table.projectId, table.publishDate),
+  clipIdIdx: index("idx_clip_publish_schedules_clip_id").on(table.clipId),
+  activeProjectDateUnique: uniqueIndex("uq_clip_publish_schedules_project_date").on(table.projectId, table.publishDate).where(sql`${table.isRepeat} = false`),
+}));
+
 export const revisions = pgTable("revisions", {
   id: uuid("id").primaryKey().defaultRandom(),
   clipId: uuid("clip_id")
@@ -338,6 +365,7 @@ export const clipsRelations = relations(clips, (helpers) => ({
     references: [videoSizes.id],
   }),
   publishedPosts: helpers.many(publishedPosts),
+  publishSchedule: helpers.one(clipPublishSchedules),
 }));
 
 export const publishedPostsRelations = relations(publishedPosts, (helpers) => ({
@@ -414,6 +442,21 @@ export const notifications = pgTable("notifications", {
 export const notificationsRelations = relations(notifications, (helpers) => ({
   user: helpers.one(users, {
     fields: [notifications.userId],
+    references: [users.id],
+  }),
+}));
+
+export const clipPublishSchedulesRelations = relations(clipPublishSchedules, (helpers) => ({
+  project: helpers.one(projects, {
+    fields: [clipPublishSchedules.projectId],
+    references: [projects.id],
+  }),
+  clip: helpers.one(clips, {
+    fields: [clipPublishSchedules.clipId],
+    references: [clips.id],
+  }),
+  createdByUser: helpers.one(users, {
+    fields: [clipPublishSchedules.createdBy],
     references: [users.id],
   }),
 }));

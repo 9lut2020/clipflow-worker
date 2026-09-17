@@ -7,7 +7,7 @@ import { ClipSubmitRevisionSchema, ClipScheduleSchema, ClipFastSubmitSchema } fr
 import { logActivity } from "../services/activity-logger";
 // Static imports — avoids re-loading on every request
 import { eq, desc } from "drizzle-orm";
-import { clips as clipsTable, publishedPosts, users } from "@clipflow/db";
+import { clips as clipsTable, clipPublishSchedules, publishedPosts, users } from "@clipflow/db";
 
 export const clips = new Hono<{
   Bindings: { DATABASE_URL: string };
@@ -90,6 +90,44 @@ clips.patch(
         ? new Date(body.scheduledPublishAt) 
         : null;
 
+      const targetClip = await db.query.clips.findFirst({
+        where: (row: any, { eq }: any) => eq(row.id, id),
+        columns: { id: true, name: true, projectId: true },
+      });
+
+      if (!targetClip) {
+        return c.json(
+          { status: "error", message: "Clip not found", data: null },
+          404,
+        );
+      }
+
+      if (scheduledPublishAt && Number.isNaN(scheduledPublishAt.getTime())) {
+        return c.json(
+          { status: "error", message: "Invalid publish date/time", data: null },
+          400,
+        );
+      }
+
+      if (scheduledPublishAt && !body.isRepeat) {
+        const publishDate = scheduledPublishAt.toISOString().slice(0, 10);
+        const sameDaySchedules = await db.query.clipPublishSchedules.findMany({
+          where: (row: any, { eq, and }: any) => and(
+            eq(row.projectId, targetClip.projectId),
+            eq(row.publishDate, publishDate),
+            eq(row.isRepeat, false),
+          ),
+          columns: { clipId: true },
+        });
+
+        if (sameDaySchedules.some((schedule: any) => schedule.clipId !== id)) {
+          return c.json(
+            { status: "error", message: "รายการนี้มีคลิปกำหนดโพสต์ในวันดังกล่าวแล้ว", data: { conflict: true } },
+            409,
+          );
+        }
+      }
+
       const [updated] = await db
         .update(clipsTable)
         .set({ 
@@ -99,11 +137,29 @@ clips.patch(
         .where(eq(clipsTable.id, id))
         .returning();
 
-      if (!updated) {
-        return c.json(
-          { status: "error", message: "Clip not found", data: null },
-          404,
-        );
+      if (scheduledPublishAt) {
+        await db.insert(clipPublishSchedules).values({
+          projectId: targetClip.projectId,
+          clipId: id,
+          publishDate: scheduledPublishAt.toISOString().slice(0, 10),
+          publishTime: scheduledPublishAt.toISOString().slice(11, 19),
+          isRepeat: body.isRepeat ?? false,
+          note: body.note || null,
+          createdBy: actorId,
+        }).onConflictDoUpdate({
+          target: clipPublishSchedules.clipId,
+          set: {
+            projectId: targetClip.projectId,
+            publishDate: scheduledPublishAt.toISOString().slice(0, 10),
+            publishTime: scheduledPublishAt.toISOString().slice(11, 19),
+            isRepeat: body.isRepeat ?? false,
+            note: body.note || null,
+            status: "SCHEDULED",
+            updatedAt: new Date(),
+          },
+        });
+      } else {
+        await db.delete(clipPublishSchedules).where(eq(clipPublishSchedules.clipId, id));
       }
 
       // Log activity
