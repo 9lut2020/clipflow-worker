@@ -478,6 +478,7 @@ projects.post(
       }
 
       // 3. Dispatch LINE Notifications via NotificationService
+      const assignerName = c.get("user")?.name || "ผู้ดูแลระบบ";
       for (const [ownerId, taskList] of assignmentsByOwner.entries()) {
         const ownerUser = userMap.get(ownerId);
         if (ownerUser?.lineUserId) {
@@ -492,6 +493,7 @@ projects.post(
                   projectId: projectId,
                   toLineUserId: ownerUser.lineUserId,
                   displayName: ownerUser.displayName,
+                  assignerName,
                   clipName: task.clipName,
                   projectName: task.projectName,
                   deadline: task.deadline,
@@ -508,7 +510,6 @@ projects.post(
               promise.catch(() => {});
             }
           } else if (taskList.length > 1) {
-            const assignerName = c.get("user")?.displayName || "Admin";
             const promise = NotificationService.dispatch(
               {
                 type: "MULTI_TASK_ASSIGNED",
