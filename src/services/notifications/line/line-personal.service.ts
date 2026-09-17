@@ -2,6 +2,7 @@ import {
   notifyNeedsRevision,
   notifyClipApproved,
   notifyTaskAssigned,
+  notifyTasksAssigned,
   notifySubmissionPending,
   notifyLoginSuccess,
 } from "./flex-templates";
@@ -20,6 +21,14 @@ export const LinePersonalService = {
   async sendTaskAssigned(payload: any) {
     if (!payload.toLineUserId) return;
     return notifyTaskAssigned(payload);
+  },
+
+  async sendTasksAssigned(payload: any) {
+    if (!payload.toLineUserId) return;
+    return notifyTasksAssigned({
+      ...payload,
+      toLineUserId: payload.toLineUserId,
+    });
   },
   
   async sendLoginSuccess(payload: any) {

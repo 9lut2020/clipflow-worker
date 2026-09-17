@@ -416,6 +416,7 @@ projects.post(
             description: clipData.description || null,
             episodeId: episode.id,
             platform: clipData.platform || "TIKTOK",
+            videoSizeId: clipData.videoSizeId || null,
             updatedAt: new Date(),
           };
 
@@ -450,6 +451,7 @@ projects.post(
               name: clipData.name,
               description: clipData.description || null,
               platform: clipData.platform || "TIKTOK",
+              videoSizeId: clipData.videoSizeId || null,
               ownerId: finalOwnerId,
               createdBy: finalCreatedBy,
               status: "DRAFT",
@@ -479,7 +481,8 @@ projects.post(
       for (const [ownerId, taskList] of assignmentsByOwner.entries()) {
         const ownerUser = userMap.get(ownerId);
         if (ownerUser?.lineUserId) {
-          for (const task of taskList) {
+          if (taskList.length === 1) {
+            const task = taskList[0];
             const promise = NotificationService.dispatch(
               {
                 type: "TASK_ASSIGNED",
@@ -493,6 +496,29 @@ projects.post(
                   projectName: task.projectName,
                   deadline: task.deadline,
                   description: task.description,
+                  channelAccessToken: (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN,
+                },
+              },
+              db,
+            );
+            if (c.executionCtx?.waitUntil) {
+              c.executionCtx.waitUntil(promise);
+            } else {
+              promise.catch(() => {});
+            }
+          } else if (taskList.length > 1) {
+            const assignerName = c.get("user")?.displayName || "Admin";
+            const promise = NotificationService.dispatch(
+              {
+                type: "MULTI_TASK_ASSIGNED",
+                payload: {
+                  assigneeId: ownerId,
+                  projectId: projectId,
+                  toLineUserId: ownerUser.lineUserId,
+                  displayName: ownerUser.displayName,
+                  assignerName: assignerName,
+                  tasks: taskList,
+                  baseUrl: (c.env as any)?.FRONTEND_URL || "https://clipflow.com",
                   channelAccessToken: (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN,
                 },
               },

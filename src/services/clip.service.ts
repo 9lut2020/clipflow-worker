@@ -42,6 +42,7 @@ export const ClipService = {
           description: true,
           status: true,
           platform: true,
+          videoSizeId: true,
           deadline: true,
           scheduledPublishAt: true,
           currentRevisionId: true,
@@ -52,6 +53,7 @@ export const ClipService = {
           owner: { columns: { id: true, displayName: true, pictureUrl: true } },
           episode: { columns: { id: true, episodeNo: true, name: true } },
           project: { columns: { id: true, name: true } },
+          videoSize: { columns: { id: true, name: true, width: true, height: true } },
           publishedPosts: true,
           currentRevision: {
             columns: { id: true, driveUrl: true, revisionNo: true },
@@ -84,6 +86,7 @@ export const ClipService = {
           description: true,
           status: true,
           platform: true,
+          videoSizeId: true,
           deadline: true,
           scheduledPublishAt: true,
           currentRevisionId: true,
@@ -94,6 +97,7 @@ export const ClipService = {
           project: { columns: { id: true, name: true } },
           episode: { columns: { id: true, episodeNo: true, name: true } },
           owner: { columns: { id: true, displayName: true, pictureUrl: true } },
+          videoSize: { columns: { id: true, name: true, width: true, height: true } },
         },
       })
       .catch(() => null);

@@ -14,6 +14,7 @@ import { notifications } from "./routes/notifications";
 import { activityLogsRouter } from "./routes/activity-logs";
 import { analyticsRouter } from "./routes/analytics";
 import { adminRouter } from "./routes/admin";
+import { videoSizesRouter } from "./routes/video-sizes";
 import { aggregateDailyMetrics } from "./cron/analytics-aggregator";
 
 export type Env = {
@@ -269,6 +270,7 @@ api.route("/notifications", notifications);
 api.route("/activity-logs", activityLogsRouter);
 api.route("/analytics", analyticsRouter);
 api.route("/admin", adminRouter);
+api.route("/video-sizes", videoSizesRouter);
 
 app.route("/api", api);
 
