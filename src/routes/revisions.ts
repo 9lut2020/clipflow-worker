@@ -111,7 +111,8 @@ revisions.post("/:id/reviews", reviewerOrAdmin, zValidator("json", ReviewSubmitS
         message: err?.message || "Failed to submit review",
         data: null,
       },
-      err?.message === "Revision or Clip not found" ? 404 : 500,
+        err?.message === "Revision or Clip not found" ? 404 :
+          err?.message === "Clip is not ready for review" ? 409 : 500,
     );
   }
 });

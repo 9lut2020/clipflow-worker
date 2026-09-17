@@ -63,6 +63,8 @@ export const ReviewSubmitSchema = z.object({
 
 export const ClipScheduleSchema = z.object({
   scheduledPublishAt: z.string().optional().nullable(),
+  isRepeat: z.boolean().optional().default(false),
+  note: z.string().max(1000).optional().nullable(),
 });
 
 export const ClipFastSubmitSchema = z.object({

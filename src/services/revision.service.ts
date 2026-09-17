@@ -250,6 +250,15 @@ export const RevisionService = {
       clipId = clip.id;
     }
 
+    const currentClip = await db.query.clips.findFirst({
+      where: (clipRow: any, { eq }: any) => eq(clipRow.id, clipId),
+      columns: { id: true, status: true },
+    });
+
+    if (!currentClip || (currentClip.status !== "PENDING_REVIEW" && currentClip.status !== "IN_REVIEW")) {
+      throw new Error("Clip is not ready for review");
+    }
+
     let notificationPayload: any = null;
     let newReviewResult: any = null;
 
