@@ -16,12 +16,73 @@ export const notifications = new Hono<{
     DATABASE_URL: string;
     LINE_CHANNEL_ACCESS_TOKEN?: string;
     LINE_ADMIN_GROUP_ID?: string;
+    VAPID_PUBLIC_KEY?: string;
+    VAPID_PRIVATE_KEY?: string;
+    VAPID_SUBJECT?: string;
   };
   Variables: { db: ReturnType<typeof createDb> };
 }>();
 
 import { eq, and, desc, count } from "drizzle-orm";
 import { notifications as notificationsSchema } from "@clipflow/db";
+import { pushSubscriptions } from "@clipflow/db";
+import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
+
+const PushSubscriptionSchema = z.object({
+  endpoint: z.string().url(),
+  expirationTime: z.number().nullable().optional(),
+  keys: z.object({
+    p256dh: z.string().min(1),
+    auth: z.string().min(1),
+  }),
+});
+
+notifications.get("/push/public-key", async (c) => {
+  if (!c.env.VAPID_PUBLIC_KEY) {
+    return c.json({ status: "error", message: "Web Push is not configured", data: null }, 503);
+  }
+  return c.json({ status: "success", message: "VAPID public key retrieved", data: c.env.VAPID_PUBLIC_KEY });
+});
+
+notifications.post("/push/subscribe", zValidator("json", PushSubscriptionSchema), async (c) => {
+  const user = c.get("user" as any);
+  if (!user) return c.json({ status: "error", message: "Unauthorized", data: null }, 401);
+  const subscription = c.req.valid("json");
+  const db = c.get("db");
+
+  await db.insert(pushSubscriptions).values({
+    userId: user.id,
+    endpoint: subscription.endpoint,
+    p256dh: subscription.keys.p256dh,
+    auth: subscription.keys.auth,
+    expirationTime: subscription.expirationTime ?? null,
+    updatedAt: new Date(),
+  }).onConflictDoUpdate({
+    target: pushSubscriptions.endpoint,
+    set: {
+      userId: user.id,
+      p256dh: subscription.keys.p256dh,
+      auth: subscription.keys.auth,
+      expirationTime: subscription.expirationTime ?? null,
+      updatedAt: new Date(),
+    },
+  });
+
+  return c.json({ status: "success", message: "Push subscription saved", data: null }, 201);
+});
+
+notifications.delete("/push/subscribe", async (c) => {
+  const user = c.get("user" as any);
+  if (!user) return c.json({ status: "error", message: "Unauthorized", data: null }, 401);
+  const endpoint = c.req.query("endpoint");
+  if (!endpoint) return c.json({ status: "error", message: "Endpoint is required", data: null }, 400);
+  await c.get("db").delete(pushSubscriptions).where(and(
+    eq(pushSubscriptions.userId, user.id),
+    eq(pushSubscriptions.endpoint, endpoint),
+  ));
+  return c.json({ status: "success", message: "Push subscription removed", data: null });
+});
 
 /**
  * GET /notifications

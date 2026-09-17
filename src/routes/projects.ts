@@ -500,6 +500,7 @@ projects.post(
                 },
               },
               db,
+              c.env,
             );
             if (c.executionCtx?.waitUntil) {
               c.executionCtx.waitUntil(promise);
@@ -523,6 +524,7 @@ projects.post(
                 },
               },
               db,
+              c.env,
             );
             if (c.executionCtx?.waitUntil) {
               c.executionCtx.waitUntil(promise);

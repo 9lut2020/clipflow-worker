@@ -13,6 +13,7 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@block65/webcrypto-web-push": "^2.0.0",
     "@clipflow/db": "workspace:*",
     "@clipflow/lib": "workspace:*",
     "@clipflow/types": "workspace:*",
@@ -26,6 +27,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241022.0",
     "drizzle-kit": "^0.31.10",
+    "tsx": "^4.23.13",
     "typescript": "^5",
     "wrangler": "^4.0.0"
   }

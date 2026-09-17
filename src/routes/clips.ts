@@ -187,6 +187,7 @@ clips.post("/fast-submit", zValidator("json", ClipFastSubmitSchema), async (c) =
       channelAccessToken: (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN,
       adminGroupId: (c.env as any)?.LINE_ADMIN_GROUP_ID,
       executionCtx: c.executionCtx,
+      pushEnv: c.env,
     });
 
     return c.json(
@@ -242,6 +243,7 @@ clips.post("/:id/revisions", zValidator("json", ClipSubmitRevisionSchema), async
       channelAccessToken: (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN,
       adminGroupId: (c.env as any)?.LINE_ADMIN_GROUP_ID,
       executionCtx: c.executionCtx,
+      pushEnv: c.env,
     });
 
     return c.json(
