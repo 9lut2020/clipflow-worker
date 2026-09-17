@@ -19,6 +19,7 @@ import {
   ClipBatchCreateSchema,
 } from "@clipflow/validations";
 import { z } from "zod";
+import { handleApiError, paginated, parseListQuery, parseOptionalBoolean } from "../lib/api-contract";
 
 export const projects = new Hono<{
   Bindings: { DATABASE_URL: string };
@@ -30,17 +31,12 @@ export const projects = new Hono<{
  * List all active projects (lightweight — no episodes/clips)
  */
 projects.get("/", async (c: any) => {
-  const db = c.get("db");
-  const user = c.get("user");
-  const service = new ProjectService(db);
-
-  const allProjects = await service.listProjects(user);
-
-  return c.json({
-    status: "success",
-    message: "Projects retrieved successfully",
-    data: allProjects,
-  });
+  try {
+    const query = parseListQuery(c, { allowedSort: ["name", "createdAt", "updatedAt"] as const, defaultSort: "createdAt" });
+    const service = new ProjectService(c.get("db"));
+    const result = await service.listProjects(c.get("user"), { ...query, isActive: parseOptionalBoolean(c.req.query("isActive")), memberId: c.req.query("memberId") });
+    return c.json({ status: "success", message: "Projects retrieved successfully", data: paginated(result.items, result.total, query.page, query.limit) });
+  } catch (error) { return handleApiError(c, error); }
 });
 
 /**
@@ -88,7 +84,7 @@ projects.get("/:id", async (c: any) => {
   const id = c.req.param("id");
   const service = new ProjectService(db);
 
-  const project = await service.getProject(id);
+  const project = await service.getProject(id, c.get("user"));
 
   if (!project) {
     return c.json(
@@ -223,7 +219,8 @@ projects.get("/:id/clips", async (c: any) => {
   const service = new ProjectService(db);
 
   try {
-    const data = await service.getProjectClips(id, user);
+    const query = parseListQuery(c, { allowedSort: ["createdAt", "updatedAt", "deadline", "scheduledPublishAt", "name"] as const, defaultSort: "createdAt" });
+    const data = await service.getProjectClips(id, user, { limit: query.limit, offset: query.offset, sortBy: query.sortBy, sortOrder: query.sortOrder, q: query.q, episodeId: c.req.query("episodeId"), ownerId: c.req.query("ownerId"), status: c.req.query("status")?.split(",") });
 
     if (!data) {
       return c.json(
@@ -235,7 +232,7 @@ projects.get("/:id/clips", async (c: any) => {
     return c.json({
       status: "success",
       message: "Project clips retrieved successfully",
-      data,
+      data: paginated(data.items, data.total, query.page, query.limit, { project: data.project }),
     });
   } catch (error: any) {
     if (error.message?.includes("Forbidden")) {
@@ -564,20 +561,48 @@ projects.post(
 
 /**
  * GET /projects/:id/members
- * Get all members in a project
+ * ADMIN — list members in a project with pagination and filters
  */
-projects.get("/:id/members", async (c) => {
+projects.get("/:id/members", adminOnly, async (c) => {
   const db = c.get("db");
-  const projectId = c.req.param("id");
-  const service = new ProjectService(db);
+  const projectId = c.req.param("id") as string;
 
-  const usersList = await service.getProjectMembers(projectId);
+  try {
+    const query = parseListQuery(c, {
+      allowedSort: ["displayName", "lastActiveAt"] as const,
+      defaultSort: "displayName",
+    });
+    const service = new ProjectService(db);
+    const allMembers: any[] = await service.getProjectMembers(projectId);
 
-  return c.json({
-    status: "success",
-    message: "Project members retrieved",
-    data: usersList,
-  });
+    // Filter client-side (service DB-level filter is a Phase 2+ upgrade)
+    let filtered = allMembers;
+    const q = query.q?.toLowerCase();
+    if (q) filtered = filtered.filter((m: any) => m.displayName?.toLowerCase().includes(q));
+    const roleFilter = c.req.query("role");
+    if (roleFilter) filtered = filtered.filter((m: any) => m.role === roleFilter);
+    const isActiveFilter = parseOptionalBoolean(c.req.query("isActive"));
+    if (isActiveFilter !== undefined) filtered = filtered.filter((m: any) => m.isActive === isActiveFilter);
+
+    // Sort
+    filtered.sort((a: any, b: any) => {
+      const field = query.sortBy === "displayName" ? "displayName" : "lastActiveAt";
+      const aVal = (a[field] ?? "").toString();
+      const bVal = (b[field] ?? "").toString();
+      return query.sortOrder === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    });
+
+    const total = filtered.length;
+    const items = filtered.slice(query.offset, query.offset + query.limit);
+
+    return c.json({
+      status: "success",
+      message: "Project members retrieved",
+      data: paginated(items, total, query.page, query.limit),
+    });
+  } catch (error) {
+    return handleApiError(c, error);
+  }
 });
 
 /**
@@ -586,6 +611,7 @@ projects.get("/:id/members", async (c) => {
  */
 projects.post(
   "/:id/members",
+  adminOnly,
   zValidator("json", z.object({ userId: z.string().uuid() })),
   async (c: any) => {
     const db = c.get("db");
@@ -623,7 +649,7 @@ projects.post(
  * DELETE /projects/:id/members/:userId
  * Remove a member from a project
  */
-projects.delete("/:id/members/:userId", async (c: any) => {
+projects.delete("/:id/members/:userId", adminOnly, async (c: any) => {
   const db = c.get("db");
   const projectId = c.req.param("id");
   const userId = c.req.param("userId");

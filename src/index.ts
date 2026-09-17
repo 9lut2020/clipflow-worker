@@ -15,6 +15,9 @@ import { activityLogsRouter } from "./routes/activity-logs";
 import { analyticsRouter } from "./routes/analytics";
 import { adminRouter } from "./routes/admin";
 import { videoSizesRouter } from "./routes/video-sizes";
+import { publishSchedulesRouter } from "./routes/publish-schedules";
+import { internalRouter } from "./routes/internal";
+import { publicRouter } from "./routes/public";
 import { aggregateDailyMetrics } from "./cron/analytics-aggregator";
 
 export type Env = {
@@ -258,7 +261,13 @@ app.post("/webhook/line", async (c: any) => {
   }
 });
 
-// ─── API Routes ────────────────────────────────────────────────────────────
+// ─── Public API (no auth) ──────────────────────────────────────────────────
+app.route("/api/public", publicRouter);
+
+// ─── Internal API (x-internal-secret guard, no user auth) ──────────────────
+app.route("/api/internal", internalRouter);
+
+// ─── Authenticated API Routes ──────────────────────────────────────────────
 const api = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // Auth middleware applies to all /api/* routes
@@ -274,16 +283,14 @@ api.route("/activity-logs", activityLogsRouter);
 api.route("/analytics", analyticsRouter);
 api.route("/admin", adminRouter);
 api.route("/video-sizes", videoSizesRouter);
+api.route("/publish-schedules", publishSchedulesRouter);
 
 app.route("/api", api);
 
 // ─── 404 ───────────────────────────────────────────────────────────────────
 app.notFound((c: any) =>
   c.json(
-    {
-      success: false,
-      error: { code: "NOT_FOUND", message: "Route not found" },
-    },
+    { success: false, error: { code: "NOT_FOUND", message: "Route not found" } },
     404,
   ),
 );
