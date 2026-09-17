@@ -417,3 +417,25 @@ export const notificationsRelations = relations(notifications, (helpers) => ({
     references: [users.id],
   }),
 }));
+
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  endpoint: text("endpoint").notNull().unique(),
+  p256dh: text("p256dh").notNull(),
+  auth: text("auth").notNull(),
+  expirationTime: bigint("expiration_time", { mode: "number" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  userIdIdx: index("idx_push_subscriptions_user_id").on(table.userId),
+}));
+
+export const pushSubscriptionsRelations = relations(pushSubscriptions, (helpers) => ({
+  user: helpers.one(users, {
+    fields: [pushSubscriptions.userId],
+    references: [users.id],
+  }),
+}));

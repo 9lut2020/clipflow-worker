@@ -44,6 +44,7 @@ export const RevisionService = {
     channelAccessToken,
     adminGroupId,
     executionCtx,
+    pushEnv,
   }: {
     db: any;
     clipId: string;
@@ -53,6 +54,7 @@ export const RevisionService = {
     channelAccessToken?: string;
     adminGroupId?: string;
     executionCtx?: any;
+    pushEnv?: Record<string, unknown>;
   }) {
     // We can do pre-reads outside the transaction to reduce lock time
     const existingRevisions = await db.query.revisions
@@ -140,7 +142,7 @@ export const RevisionService = {
       const promise = NotificationService.dispatch({
         type: "PENDING_REVIEW",
         payload: notificationPayload,
-      }, db);
+      }, db, pushEnv);
       if (executionCtx?.waitUntil) {
         executionCtx.waitUntil(promise);
       } else {
@@ -208,6 +210,7 @@ export const RevisionService = {
     fallbackReviewerName,
     channelAccessToken,
     executionCtx,
+    pushEnv,
   }: {
     db: any;
     targetId: string;
@@ -219,6 +222,7 @@ export const RevisionService = {
     fallbackReviewerName: string;
     channelAccessToken?: string;
     executionCtx?: any;
+    pushEnv?: Record<string, unknown>;
   }) {
     let revisionId = targetId;
     let clipId = "";
@@ -355,7 +359,7 @@ export const RevisionService = {
       const promise = NotificationService.dispatch({
         type: status,
         payload: notificationPayload,
-      }, db);
+      }, db, pushEnv);
       if (executionCtx?.waitUntil) {
         executionCtx.waitUntil(promise);
       } else {

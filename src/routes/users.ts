@@ -137,7 +137,7 @@ users.post("/sync", zValidator("json", UserSyncSchema), async (c) => {
           displayName: user.displayName || "Editor",
           channelAccessToken: (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN,
         }
-      }, db);
+      }, db, c.env);
       if (c.executionCtx?.waitUntil) {
         c.executionCtx.waitUntil(promise);
       } else {

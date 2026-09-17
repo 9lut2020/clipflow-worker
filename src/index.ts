@@ -25,6 +25,9 @@ export type Env = {
   GOOGLE_SERVICE_ACCOUNT_KEY: string;
   JWT_SECRET: string;
   NOTIFICATION_QUEUE: Queue;
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
+  VAPID_SUBJECT?: string;
 };
 
 type Variables = {
