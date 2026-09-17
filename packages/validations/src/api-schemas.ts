@@ -1,5 +1,26 @@
 import { z } from "zod";
 
+export const PaginationQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  q: z.string().trim().max(100).optional(),
+  sortBy: z.string().optional(),
+  sortOrder: z.enum(["asc", "desc"]).default("desc"),
+});
+
+export const DateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
+
+export const UuidParamSchema = z.object({ id: z.string().uuid() });
+
+export const PaginationMetaSchema = z.object({
+  page: z.number().int(),
+  limit: z.number().int(),
+  total: z.number().int(),
+  totalPages: z.number().int(),
+  hasNext: z.boolean(),
+  hasPrevious: z.boolean(),
+});
+
 export const ClipSubmitRevisionSchema = z.object({
   driveUrl: z.string().url("Must be a valid URL").optional(),
   submitNote: z.string().optional(),
@@ -38,7 +59,6 @@ export const UserSyncSchema = z.object({
   lineUserId: z.string().min(1, "lineUserId is required"),
   displayName: z.string().optional(),
   pictureUrl: z.string().url().optional().or(z.literal("")).nullable(),
-  role: z.enum(["USER", "REVIEWER", "ADMIN"]).optional(),
 });
 
 export const UserProfileUpdateSchema = z.object({

@@ -8,6 +8,8 @@ import { logActivity } from "../services/activity-logger";
 // Static imports — avoids re-loading on every request
 import { eq, desc } from "drizzle-orm";
 import { clips as clipsTable, clipPublishSchedules, publishedPosts, users } from "@clipflow/db";
+import { apiError, handleApiError, paginated, parseDate, parseListQuery, parseMultiValue } from "../lib/api-contract";
+import { adminOnly } from "../middleware/role";
 
 export const clips = new Hono<{
   Bindings: { DATABASE_URL: string };
@@ -19,33 +21,23 @@ export const clips = new Hono<{
  * List clips with filters.
  */
 clips.get("/", async (c: Context) => {
-  const db = c.get("db");
-  const episodeId = c.req.query("episodeId");
-  const ownerId = c.req.query("ownerId");
-  const statusParam = c.req.query("status");
-  const status = statusParam?.includes(",") ? statusParam.split(",") : statusParam;
-  const excludeApproved = c.req.query("excludeApproved") === "true";
-
-  const limitStr = c.req.query("limit");
-  const offsetStr = c.req.query("offset");
-  const limit = limitStr ? parseInt(limitStr, 10) : undefined;
-  const offset = offsetStr ? parseInt(offsetStr, 10) : undefined;
-
-  const allClips = await ClipService.listClips({
-    db,
-    episodeId,
-    ownerId,
-    status,
-    excludeApproved,
-    limit,
-    offset,
-  });
-
-  return c.json({
-    status: "success",
-    message: "Clips retrieved successfully",
-    data: allClips,
-  });
+  try {
+    const query = parseListQuery(c, { allowedSort: ["createdAt", "updatedAt", "deadline", "scheduledPublishAt", "name"] as const, defaultSort: "createdAt" });
+    const statuses = parseMultiValue(c, "status");
+    const result = await ClipService.listClips({
+      db: c.get("db"),
+      user: c.get("user") as any,
+      episodeId: c.req.query("episodeId"), projectId: c.req.query("projectId"), ownerId: c.req.query("ownerId"), videoSizeId: c.req.query("videoSizeId"),
+      status: statuses.length ? statuses : undefined,
+      excludeApproved: c.req.query("excludeApproved") === "true",
+      scheduledState: c.req.query("scheduledState") as any, postingState: c.req.query("postingState") as any,
+      scheduledFrom: parseDate(c.req.query("scheduledFrom"), "scheduledFrom"), scheduledTo: parseDate(c.req.query("scheduledTo"), "scheduledTo"),
+      deadlineFrom: parseDate(c.req.query("deadlineFrom"), "deadlineFrom"), deadlineTo: parseDate(c.req.query("deadlineTo"), "deadlineTo"),
+      createdFrom: parseDate(c.req.query("createdFrom"), "createdFrom"), createdTo: parseDate(c.req.query("createdTo"), "createdTo"),
+      q: query.q, limit: query.limit, offset: query.offset, sortBy: query.sortBy, sortOrder: query.sortOrder,
+    });
+    return c.json({ status: "success", message: "Clips retrieved successfully", data: paginated(result.items, result.total, query.page, query.limit) });
+  } catch (error) { return handleApiError(c, error); }
 });
 
 /**
@@ -56,7 +48,7 @@ clips.get("/:id", async (c: Context) => {
   const db = c.get("db");
   const id = c.req.param("id") as string;
 
-  const clip = await ClipService.getClip({ db, id });
+  const clip = await ClipService.getClip({ db, id, user: c.get("user") as any });
 
   if (!clip) {
     return c.json(
@@ -78,6 +70,7 @@ clips.get("/:id", async (c: Context) => {
  */
 clips.patch(
   "/:id/schedule",
+  adminOnly,
   zValidator("json", ClipScheduleSchema),
   async (c) => {
     const db = c.get("db");
@@ -192,19 +185,39 @@ clips.patch(
 
 /**
  * GET /clips/:id/revisions
- * List all revisions for a clip (ordered by revisionNo desc)
+ * List all revisions for a clip with pagination and filters
  */
 clips.get("/:id/revisions", async (c: Context) => {
-  const db = c.get("db");
-  const clipId = c.req.param("id") as string;
+  try {
+    const db = c.get("db");
+    const clipId = c.req.param("id") as string;
+    const query = parseListQuery(c, {
+      allowedSort: ["revisionNo", "submittedAt"] as const,
+      defaultSort: "submittedAt",
+    });
+    const submittedBy = c.req.query("submittedBy");
+    const from = parseDate(c.req.query("from"), "from");
+    const to = parseDate(c.req.query("to"), "to");
 
-  const allRevisions = await RevisionService.getRevisionsForClip({ db, clipId });
+    const allRevisions = await RevisionService.getRevisionsForClip({ db, clipId });
 
-  return c.json({
-    status: "success",
-    message: "Revisions retrieved successfully",
-    data: allRevisions,
-  });
+    // Apply filter client-side for now (service will be upgraded to accept DB-level filters separately)
+    let filtered: any[] = Array.isArray(allRevisions) ? allRevisions : [];
+    if (submittedBy) filtered = filtered.filter((r: any) => r.submittedById === submittedBy || r.submittedBy?.id === submittedBy);
+    if (from) filtered = filtered.filter((r: any) => r.submittedAt >= new Date(`${from}T00:00:00Z`));
+    if (to) filtered = filtered.filter((r: any) => r.submittedAt <= new Date(`${to}T23:59:59Z`));
+
+    const total = filtered.length;
+    const items = filtered.slice(query.offset, query.offset + query.limit);
+
+    return c.json({
+      status: "success",
+      message: "Revisions retrieved successfully",
+      data: paginated(items, total, query.page, query.limit),
+    });
+  } catch (error) {
+    return handleApiError(c, error);
+  }
 });
 
 /**
@@ -327,7 +340,7 @@ clips.post("/:id/revisions", zValidator("json", ClipSubmitRevisionSchema), async
  * DELETE /clips/:id
  * Delete a clip by ID
  */
-clips.delete("/:id", async (c: Context) => {
+clips.delete("/:id", adminOnly, async (c: Context) => {
   const db = c.get("db");
   const id = c.req.param("id") as string;
 
@@ -347,28 +360,56 @@ clips.delete("/:id", async (c: Context) => {
 
 /**
  * GET /clips/:id/published-posts
- * List all published posts for a clip
+ * List all published posts for a clip — ADMIN only, paginated
  */
-clips.get("/:id/published-posts", async (c: Context) => {
-  const db = c.get("db");
-  const clipId = c.req.param("id") as string;
-
+clips.get("/:id/published-posts", adminOnly, async (c: Context) => {
   try {
-    const posts = await db.select({
-      id: publishedPosts.id,
-      clipId: publishedPosts.clipId,
-      platform: publishedPosts.platform,
-      caption: publishedPosts.caption,
-      url: publishedPosts.url,
-      publishedAt: publishedPosts.publishedAt,
-      publishedBy: users.displayName,
-    })
-    .from(publishedPosts)
-    .leftJoin(users, eq(publishedPosts.publishedBy, users.id))
-    .where(eq(publishedPosts.clipId, clipId))
-    .orderBy(desc(publishedPosts.publishedAt));
+    const db = c.get("db");
+    const clipId = c.req.param("id") as string;
+    const query = parseListQuery(c, {
+      allowedSort: ["publishedAt"] as const,
+      defaultSort: "publishedAt",
+    });
+    const platformFilter = c.req.query("platform");
+    const from = parseDate(c.req.query("from"), "from");
+    const to = parseDate(c.req.query("to"), "to");
 
-    return c.json({ status: "success", message: "Published posts retrieved", data: posts });
+    const { gte, lte } = await import("drizzle-orm");
+
+    const conditions: any[] = [eq(publishedPosts.clipId, clipId)];
+    if (platformFilter) conditions.push(eq(publishedPosts.platform, platformFilter as any));
+    if (from) conditions.push(gte(publishedPosts.publishedAt, new Date(`${from}T00:00:00Z`)));
+    if (to) conditions.push(lte(publishedPosts.publishedAt, new Date(`${to}T23:59:59Z`)));
+    const where = conditions.length ? (await import("drizzle-orm")).and(...conditions) : eq(publishedPosts.clipId, clipId);
+
+    const dir = query.sortOrder === "asc" ? (await import("drizzle-orm")).asc : desc;
+
+    const [posts, totalRows] = await Promise.all([
+      db.select({
+        id: publishedPosts.id,
+        clipId: publishedPosts.clipId,
+        platform: publishedPosts.platform,
+        caption: publishedPosts.caption,
+        url: publishedPosts.url,
+        publishedAt: publishedPosts.publishedAt,
+        publishedBy: users.displayName,
+      })
+      .from(publishedPosts)
+      .leftJoin(users, eq(publishedPosts.publishedBy, users.id))
+      .where(where)
+      .orderBy(dir(publishedPosts.publishedAt))
+      .limit(query.limit)
+      .offset(query.offset),
+      db.select({ count: (await import("drizzle-orm")).sql<number>`count(*)::int` })
+        .from(publishedPosts)
+        .where(where),
+    ]);
+
+    return c.json({
+      status: "success",
+      message: "Published posts retrieved",
+      data: paginated(posts, Number(totalRows[0].count), query.page, query.limit),
+    });
   } catch (err: any) {
     console.error("Failed to fetch published posts:", err);
     return c.json({ status: "error", message: "Failed to fetch published posts", data: null }, 500);
@@ -379,7 +420,7 @@ clips.get("/:id/published-posts", async (c: Context) => {
  * POST /clips/:id/publish
  * Record a new published post
  */
-clips.post("/:id/publish", async (c: Context) => {
+clips.post("/:id/publish", adminOnly, async (c: Context) => {
   const db = c.get("db");
   const clipId = c.req.param("id") as string;
 
@@ -406,6 +447,29 @@ clips.post("/:id/publish", async (c: Context) => {
     await db.update(clipsTable)
       .set({ status: "PUBLISHED", updatedAt: new Date() })
       .where(eq(clipsTable.id, clipId));
+
+    const platformRows = await db
+      .select({ platform: publishedPosts.platform })
+      .from(publishedPosts)
+      .where(eq(publishedPosts.clipId, clipId));
+    const requiredPlatforms = new Set([
+      "TIKTOK",
+      "YOUTUBE_SHORTS",
+      "FACEBOOK_REELS",
+      "INSTAGRAM_REELS",
+    ]);
+    const publishedPlatforms = new Set(
+      platformRows.map((post: { platform: string }) => post.platform),
+    );
+    const isFullyPublished = Array.from(requiredPlatforms).every((platform) =>
+      publishedPlatforms.has(platform),
+    );
+    if (isFullyPublished) {
+      await db
+        .update(clipPublishSchedules)
+        .set({ status: "PUBLISHED", updatedAt: new Date() })
+        .where(eq(clipPublishSchedules.clipId, clipId));
+    }
 
     return c.json({ status: "success", message: "Recorded published post", data: result[0] }, 201);
   } catch (err: any) {

@@ -44,6 +44,17 @@ export const activityActionEnum = pgEnum("activity_action", [
   "TASK_ASSIGNED",
   "ROLE_CHANGED",
   "PROJECT_CREATED",
+  "CLIP_DELETED",
+  "CLIP_BATCH_SAVED",
+  "CLIP_SCHEDULED",
+  "STATUS_CHANGED",
+  "PROJECT_UPDATED",
+  "PROJECT_DELETED",
+  "EPISODE_CREATED",
+  "EPISODE_UPDATED",
+  "EPISODE_DELETED",
+  "MEMBER_ADDED",
+  "MEMBER_REMOVED",
 ]);
 
 export const auditActionEnum = pgEnum("audit_action", [
@@ -213,10 +224,26 @@ export const publishScheduleStatusEnum = pgEnum("publish_schedule_status", [
   "CANCELLED",
 ]);
 
+export const projectPublishSlots = pgTable("project_publish_slots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }).notNull(),
+  dayOfWeek: integer("day_of_week").notNull(),
+  publishTime: time("publish_time").notNull(),
+  timezone: varchar("timezone", { length: 64 }).default("Asia/Bangkok").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  projectIdx: index("idx_project_publish_slots_project_id").on(table.projectId),
+  projectDayUnique: uniqueIndex("uq_project_publish_slots_project_day").on(table.projectId, table.dayOfWeek),
+}));
+
 export const clipPublishSchedules = pgTable("clip_publish_schedules", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }).notNull(),
   clipId: uuid("clip_id").references(() => clips.id, { onDelete: "cascade" }).notNull().unique(),
+  slotId: uuid("slot_id").references(() => projectPublishSlots.id, { onDelete: "set null" }),
   publishDate: date("publish_date").notNull(),
   publishTime: time("publish_time").notNull(),
   status: publishScheduleStatusEnum("status").default("SCHEDULED").notNull(),
@@ -322,6 +349,7 @@ export const publishedPosts = pgTable("published_posts", {
 }, (table) => ({
   clipIdIdx: index("idx_published_posts_clip_id").on(table.clipId),
   publishedByIdx: index("idx_published_posts_published_by").on(table.publishedBy),
+  clipPlatformUnique: uniqueIndex("uq_published_posts_clip_platform").on(table.clipId, table.platform),
 }));
 
 // Relations with proper Drizzle helper inference
@@ -332,6 +360,7 @@ export const usersRelations = relations(users, (helpers) => ({
 export const projectsRelations = relations(projects, (helpers) => ({
   episodes: helpers.many(episodes),
   clips: helpers.many(clips),
+  publishSlots: helpers.many(projectPublishSlots),
 }));
 
 export const episodesRelations = relations(episodes, (helpers) => ({
@@ -455,10 +484,26 @@ export const clipPublishSchedulesRelations = relations(clipPublishSchedules, (he
     fields: [clipPublishSchedules.clipId],
     references: [clips.id],
   }),
+  slot: helpers.one(projectPublishSlots, {
+    fields: [clipPublishSchedules.slotId],
+    references: [projectPublishSlots.id],
+  }),
   createdByUser: helpers.one(users, {
     fields: [clipPublishSchedules.createdBy],
     references: [users.id],
   }),
+}));
+
+export const projectPublishSlotsRelations = relations(projectPublishSlots, (helpers) => ({
+  project: helpers.one(projects, {
+    fields: [projectPublishSlots.projectId],
+    references: [projects.id],
+  }),
+  createdByUser: helpers.one(users, {
+    fields: [projectPublishSlots.createdBy],
+    references: [users.id],
+  }),
+  schedules: helpers.many(clipPublishSchedules),
 }));
 
 export const pushSubscriptions = pgTable("push_subscriptions", {

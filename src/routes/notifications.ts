@@ -10,6 +10,7 @@ import {
   notifyTasksAssigned,
   notifyAdminGroupNewSubmission,
 } from "../services/notifications/line/flex-templates";
+import { adminOnly } from "../middleware/role";
 
 export const notifications = new Hono<{
   Bindings: {
@@ -23,11 +24,12 @@ export const notifications = new Hono<{
   Variables: { db: ReturnType<typeof createDb> };
 }>();
 
-import { eq, and, desc, count } from "drizzle-orm";
+import { eq, and, desc, count, sql, gte, lte } from "drizzle-orm";
 import { notifications as notificationsSchema } from "@clipflow/db";
 import { pushSubscriptions } from "@clipflow/db";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
+import { handleApiError, paginated, parseListQuery, parseOptionalBoolean } from "../lib/api-contract";
 
 const PushSubscriptionSchema = z.object({
   endpoint: z.string().url(),
@@ -86,27 +88,52 @@ notifications.delete("/push/subscribe", async (c) => {
 
 /**
  * GET /notifications
- * Get all notifications for the current user
+ * Get paginated notifications for the current user, with optional filters
  */
 notifications.get("/", async (c) => {
-  const db = c.get("db");
-  const user = c.get("user" as any);
+  try {
+    const db = c.get("db");
+    const user = c.get("user" as any);
 
-  if (!user) {
-    return c.json({ status: "error", message: "Unauthorized", data: null }, 401);
+    if (!user) {
+      return c.json({ status: "error", message: "Unauthorized", data: null }, 401);
+    }
+
+    const query = parseListQuery(c, {
+      allowedSort: ["createdAt"] as const,
+      defaultSort: "createdAt",
+    });
+    const isRead = parseOptionalBoolean(c.req.query("isRead"));
+    const typeFilter = c.req.query("type");
+    const from = c.req.query("from");
+    const to = c.req.query("to");
+
+    const conditions: any[] = [eq(notificationsSchema.userId, user.id)];
+    if (isRead !== undefined) conditions.push(eq(notificationsSchema.isRead, isRead));
+    if (typeFilter) conditions.push(eq(notificationsSchema.type as any, typeFilter));
+    if (from) conditions.push(gte(notificationsSchema.createdAt, new Date(`${from}T00:00:00Z`)));
+    if (to) conditions.push(lte(notificationsSchema.createdAt, new Date(`${to}T23:59:59Z`)));
+
+    const where = and(...conditions);
+
+    const [items, totalRows] = await Promise.all([
+      db.query.notifications.findMany({
+        where,
+        orderBy: [desc(notificationsSchema.createdAt)],
+        limit: query.limit,
+        offset: query.offset,
+      }),
+      db.select({ count: sql<number>`count(*)::int` }).from(notificationsSchema).where(where),
+    ]);
+
+    return c.json({
+      status: "success",
+      message: "Notifications retrieved",
+      data: paginated(items, Number(totalRows[0].count), query.page, query.limit),
+    });
+  } catch (error) {
+    return handleApiError(c, error);
   }
-
-  const items = await db.query.notifications.findMany({
-    where: eq(notificationsSchema.userId, user.id),
-    orderBy: [desc(notificationsSchema.createdAt)],
-    limit: 50,
-  });
-
-  return c.json({
-    status: "success",
-    message: "Notifications retrieved",
-    data: items,
-  });
 });
 
 /**
@@ -198,14 +225,21 @@ notifications.patch("/read-all", async (c) => {
 
 /**
  * POST /notifications/test-line
- * Send test LINE notification (Flex Card) to lineUserId
+ * Send test LINE notification (Flex Card) to lineUserId — ADMIN only
  */
-notifications.post("/test-line", async (c) => {
+notifications.post("/test-line", adminOnly, async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const user = c.get("user" as any);
 
-  const lineUserId =
-    body.lineUserId || user?.lineUserId || "U78d6e86d647fc4571b91793ee8c4f4fc";
+  // No hardcoded fallback — require explicit lineUserId or authenticated user's lineUserId
+  const lineUserId = body.lineUserId || (user as any)?.lineUserId;
+  if (!lineUserId) {
+    return c.json(
+      { status: "error", message: "lineUserId is required", data: null },
+      400,
+    );
+  }
+
   const type = body.type || "TEST";
 
   let result = { success: false, message: "" };

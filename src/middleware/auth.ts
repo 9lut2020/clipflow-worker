@@ -20,13 +20,8 @@ declare module "hono" {
  * Database is the authoritative source of truth for user role & status.
  */
 export const authMiddleware = async (c: Context, next: Next) => {
-  // Bypass for system sync route, health checks & test-line notification route
-  if (
-    c.req.path === "/" ||
-    c.req.path === "/api" ||
-    c.req.path.endsWith("/users/sync") ||
-    c.req.path.endsWith("/notifications/test-line")
-  ) {
+  // Bypass for health check only — /api/internal/* and /api/public/* are mounted before this middleware
+  if (c.req.path === "/" || c.req.path === "/api") {
     return next();
   }
 
