@@ -3,6 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
+# RealtimeHub is no longer used by the application. This migration removes
+# the legacy Durable Object class when the next deployment is applied.
+[[migrations]]
+tag = "remove-realtime-hub"
+deleted_classes = ["RealtimeHub"]
+
 [vars]
 ENVIRONMENT = "development"
 
