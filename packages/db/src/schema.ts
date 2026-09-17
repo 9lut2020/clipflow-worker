@@ -158,6 +158,16 @@ export const userProjects = pgTable("user_projects", {
   projectIdIdx: index("idx_user_projects_project_id").on(table.projectId),
 }));
 
+export const videoSizes = pgTable("video_sizes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 100 }).notNull().unique(),
+  width: integer("width").notNull(),
+  height: integer("height").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const clips = pgTable("clips", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id")
@@ -176,6 +186,7 @@ export const clips = pgTable("clips", {
     .notNull(),
   status: clipStatusEnum("status").default("DRAFT").notNull(),
   platform: varchar("platform", { length: 50 }).default("TIKTOK").notNull(),
+  videoSizeId: uuid("video_size_id").references(() => videoSizes.id, { onDelete: "set null" }),
   deadline: timestamp("deadline", { withTimezone: true }),
   scheduledPublishAt: timestamp("scheduled_publish_at", { withTimezone: true }),
   currentRevisionId: uuid("current_revision_id"),
@@ -321,6 +332,10 @@ export const clipsRelations = relations(clips, (helpers) => ({
   currentRevision: helpers.one(revisions, {
     fields: [clips.currentRevisionId],
     references: [revisions.id],
+  }),
+  videoSize: helpers.one(videoSizes, {
+    fields: [clips.videoSizeId],
+    references: [videoSizes.id],
   }),
   publishedPosts: helpers.many(publishedPosts),
 }));
