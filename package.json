@@ -18,6 +18,8 @@
     "@clipflow/lib": "workspace:*",
     "@clipflow/types": "workspace:*",
     "@clipflow/validations": "workspace:*",
+    "@hono/swagger-ui": "^0.6.1",
+    "@hono/zod-openapi": "^1.6.3",
     "@hono/zod-validator": "^0.4.0",
     "@neondatabase/serverless": "^0.10.0",
     "drizzle-orm": "^0.36.0",

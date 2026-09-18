@@ -199,21 +199,14 @@ clips.get("/:id/revisions", async (c: Context) => {
     const from = parseDate(c.req.query("from"), "from");
     const to = parseDate(c.req.query("to"), "to");
 
-    const allRevisions = await RevisionService.getRevisionsForClip({ db, clipId });
-
-    // Apply filter client-side for now (service will be upgraded to accept DB-level filters separately)
-    let filtered: any[] = Array.isArray(allRevisions) ? allRevisions : [];
-    if (submittedBy) filtered = filtered.filter((r: any) => r.submittedById === submittedBy || r.submittedBy?.id === submittedBy);
-    if (from) filtered = filtered.filter((r: any) => r.submittedAt >= new Date(`${from}T00:00:00Z`));
-    if (to) filtered = filtered.filter((r: any) => r.submittedAt <= new Date(`${to}T23:59:59Z`));
-
-    const total = filtered.length;
-    const items = filtered.slice(query.offset, query.offset + query.limit);
+    const visibleClip = await ClipService.getClip({ db, id: clipId, user: c.get("user") as any });
+    if (!visibleClip) return apiError(c, 404, "NOT_FOUND", "Clip not found");
+    const result = await RevisionService.getRevisionsForClip({ db, clipId, submittedBy, from, to, limit: query.limit, offset: query.offset, sortBy: query.sortBy, sortOrder: query.sortOrder });
 
     return c.json({
       status: "success",
       message: "Revisions retrieved successfully",
-      data: paginated(items, total, query.page, query.limit),
+      data: paginated(result.items, result.total, query.page, query.limit),
     });
   } catch (error) {
     return handleApiError(c, error);

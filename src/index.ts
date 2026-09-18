@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { secureHeaders } from "hono/secure-headers";
 import { linkUserRichMenu } from "./services/notifications/line/line.client";
 
 import { createDb } from "@clipflow/db";
@@ -11,7 +12,6 @@ import { clips } from "./routes/clips";
 import { users } from "./routes/users";
 import { revisions } from "./routes/revisions";
 import { notifications } from "./routes/notifications";
-import { activityLogsRouter } from "./routes/activity-logs";
 import { analyticsRouter } from "./routes/analytics";
 import { adminRouter } from "./routes/admin";
 import { videoSizesRouter } from "./routes/video-sizes";
@@ -31,6 +31,9 @@ export type Env = {
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;
   VAPID_SUBJECT?: string;
+  INTERNAL_API_SECRET?: string;
+  ENVIRONMENT?: string;
+  CORS_ORIGINS?: string;
 };
 
 type Variables = {
@@ -40,20 +43,14 @@ type Variables = {
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // ─── Global Middleware ─────────────────────────────────────────────────────
-app.use(
-  "*",
-  cors({
+app.use("*", async (c: any, next: any) => {
+  const configured = String(c.env?.CORS_ORIGINS || "https://clipflow-tmyda.vercel.app").split(",").map((value) => value.trim()).filter(Boolean);
+  const middleware = cors({
     origin: (origin) => {
-      if (
-        !origin ||
-        origin.includes("localhost") ||
-        origin.includes("127.0.0.1") ||
-        origin.endsWith("vercel.app") ||
-        origin.endsWith("trycloudflare.com")
-      ) {
-        return origin || "*";
-      }
-      return "https://clipflow-tmyda.vercel.app";
+      if (!origin) return configured[0] || "";
+      if (configured.includes(origin)) return origin;
+      if (c.env?.ENVIRONMENT === "development" && (origin.includes("localhost") || origin.includes("127.0.0.1") || origin.endsWith("trycloudflare.com"))) return origin;
+      return "";
     },
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: [
@@ -61,14 +58,22 @@ app.use(
       "Authorization",
       "x-user-id",
       "x-user-role",
+      "x-request-id",
       "x-requested-with",
     ],
     exposeHeaders: ["Content-Length"],
     maxAge: 86400,
     credentials: true,
-  })
-);
+  });
+  return middleware(c, next);
+});
 app.use("*", logger());
+app.use("*", secureHeaders());
+app.use("*", async (c: any, next: any) => {
+  const requestId = c.req.header("x-request-id") || crypto.randomUUID();
+  c.header("x-request-id", requestId);
+  await next();
+});
 
 // Inject DB instance
 app.use("*", async (c: any, next: any) => {
@@ -112,7 +117,16 @@ const showTypingIndicator = async (chatId: string, token: string, seconds = 20) 
 app.post("/webhook/line", async (c: any) => {
   try {
     const db = c.get("db");
-    const body = await c.req.json();
+    const rawBody = await c.req.text();
+    if (new TextEncoder().encode(rawBody).byteLength > 1024 * 1024) return c.text("Payload Too Large", 413);
+    const signature = c.req.header("x-line-signature") || "";
+    const channelSecret = c.env?.LINE_CHANNEL_SECRET || "";
+    if (!signature || !channelSecret) return c.text("Unauthorized", 401);
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(channelSecret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const signed = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody));
+    const expected = btoa(String.fromCharCode(...new Uint8Array(signed)));
+    if (signature.length !== expected.length || !signature.split("").every((char: string, index: number) => char.charCodeAt(0) === expected.charCodeAt(index))) return c.text("Unauthorized", 401);
+    const body = JSON.parse(rawBody);
     const token = (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN;
 
     const events = body?.events || [];
@@ -279,7 +293,6 @@ api.route("/clips", clips);
 api.route("/users", users);
 api.route("/revisions", revisions);
 api.route("/notifications", notifications);
-api.route("/activity-logs", activityLogsRouter);
 api.route("/analytics", analyticsRouter);
 api.route("/admin", adminRouter);
 api.route("/video-sizes", videoSizesRouter);

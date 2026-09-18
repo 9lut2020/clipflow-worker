@@ -573,32 +573,16 @@ projects.get("/:id/members", adminOnly, async (c) => {
       defaultSort: "displayName",
     });
     const service = new ProjectService(db);
-    const allMembers: any[] = await service.getProjectMembers(projectId);
-
-    // Filter client-side (service DB-level filter is a Phase 2+ upgrade)
-    let filtered = allMembers;
-    const q = query.q?.toLowerCase();
-    if (q) filtered = filtered.filter((m: any) => m.displayName?.toLowerCase().includes(q));
-    const roleFilter = c.req.query("role");
-    if (roleFilter) filtered = filtered.filter((m: any) => m.role === roleFilter);
-    const isActiveFilter = parseOptionalBoolean(c.req.query("isActive"));
-    if (isActiveFilter !== undefined) filtered = filtered.filter((m: any) => m.isActive === isActiveFilter);
-
-    // Sort
-    filtered.sort((a: any, b: any) => {
-      const field = query.sortBy === "displayName" ? "displayName" : "lastActiveAt";
-      const aVal = (a[field] ?? "").toString();
-      const bVal = (b[field] ?? "").toString();
-      return query.sortOrder === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    const result = await service.getProjectMembers(projectId, {
+      ...query,
+      role: c.req.query("role"),
+      isActive: parseOptionalBoolean(c.req.query("isActive")),
     });
-
-    const total = filtered.length;
-    const items = filtered.slice(query.offset, query.offset + query.limit);
 
     return c.json({
       status: "success",
       message: "Project members retrieved",
-      data: paginated(items, total, query.page, query.limit),
+      data: paginated(result.items, result.total, query.page, query.limit),
     });
   } catch (error) {
     return handleApiError(c, error);

@@ -1,8 +1,10 @@
 import { Hono } from "hono"
-import { eq } from "drizzle-orm"
-import { createDb, episodes as episodesSchema } from "@clipflow/db"
+import { and, asc, desc, eq, ilike, sql } from "drizzle-orm"
+import { createDb, episodes as episodesSchema, userProjects } from "@clipflow/db"
 import { adminOnly } from "../middleware/role"
 import { logActivity } from "../services/activity-logger"
+import { handleApiError, paginated, parseListQuery, parseOptionalBoolean } from "../lib/api-contract"
+import { ClipService } from "../services/clip.service"
 
 export const episodes = new Hono<{
   Bindings: { DATABASE_URL: string }
@@ -14,19 +16,26 @@ export const episodes = new Hono<{
  * List episodes, optionally filtered by projectId
  */
 episodes.get("/", async (c) => {
-  const db = c.get("db")
-  const projectId = c.req.query("projectId")
-
-  const allEpisodes = await db.query.episodes.findMany({
-    where: (ep, { eq, and }) => {
-      const conditions = [eq(ep.isActive, true)]
-      if (projectId) conditions.push(eq(ep.projectId, projectId))
-      return and(...conditions)
-    },
-    orderBy: (ep, { asc }) => [asc(ep.episodeNo)],
-  })
-
-  return c.json({ status: "success", message: "Episodes retrieved successfully", data: allEpisodes })
+  try {
+    const query = parseListQuery(c, { allowedSort: ["episodeNo", "name", "createdAt"] as const, defaultSort: "episodeNo", defaultLimit: 20 });
+    const user = c.get("user") as any;
+    const conditions: any[] = [];
+    const isActive = parseOptionalBoolean(c.req.query("isActive"));
+    conditions.push(eq(episodesSchema.isActive, isActive ?? true));
+    if (c.req.query("projectId")) conditions.push(eq(episodesSchema.projectId, c.req.query("projectId")!));
+    if (c.req.query("episodeNo")) conditions.push(eq(episodesSchema.episodeNo, Number(c.req.query("episodeNo"))));
+    if (query.q) conditions.push(ilike(episodesSchema.name, `%${query.q}%`));
+    if (user.role === "USER") conditions.push(sql`EXISTS (SELECT 1 FROM user_projects up WHERE up.project_id = ${episodesSchema.projectId} AND up.user_id = ${user.id})`);
+    const whereClause = and(...conditions);
+    const sortColumns = { episodeNo: episodesSchema.episodeNo, name: episodesSchema.name, createdAt: episodesSchema.createdAt };
+    const order = query.sortOrder === "asc" ? asc : desc;
+    const db = c.get("db");
+    const [items, countRows] = await Promise.all([
+      db.query.episodes.findMany({ where: whereClause, with: { project: { columns: { id: true, name: true } } }, orderBy: [order(sortColumns[query.sortBy]), order(episodesSchema.id)], limit: query.limit, offset: query.offset }),
+      db.select({ count: sql<number>`count(*)` }).from(episodesSchema).where(whereClause),
+    ]);
+    return c.json({ status: "success", message: "Episodes retrieved successfully", data: paginated(items, Number(countRows[0]?.count || 0), query.page, query.limit) });
+  } catch (error) { return handleApiError(c, error); }
 })
 
 /**
@@ -37,8 +46,9 @@ episodes.get("/:id", async (c) => {
   const db = c.get("db")
   const id = c.req.param("id")
 
+  const user = c.get("user") as any;
   const episode = await db.query.episodes.findFirst({
-    where: (ep, { eq }) => eq(ep.id, id),
+    where: (ep, { eq, and }: any) => and(eq(ep.id, id), ...(user.role === "USER" ? [sql`EXISTS (SELECT 1 FROM user_projects up WHERE up.project_id = ${ep.projectId} AND up.user_id = ${user.id})`] : [])),
     with: {
       project: { columns: { id: true, name: true } },
     },
@@ -157,11 +167,14 @@ episodes.delete("/:id", adminOnly, async (c: any) => {
  * { episode, project, clips[] } — episode/project NOT repeated per clip
  */
 episodes.get("/:id/clips", async (c) => {
+  try {
   const db = c.get("db")
-  const episodeId = c.req.param("id")
+  const episodeId = c.req.param("id") as string
+  const user = c.get("user") as any
+  const query = parseListQuery(c, { allowedSort: ["createdAt", "updatedAt", "deadline", "scheduledPublishAt", "name"] as const, defaultSort: "createdAt" });
 
   const episode = await db.query.episodes.findFirst({
-    where: (ep, { eq }) => eq(ep.id, episodeId),
+    where: (ep, { eq, and }: any) => and(eq(ep.id, episodeId), ...(user.role === "USER" ? [sql`EXISTS (SELECT 1 FROM user_projects up WHERE up.project_id = ${ep.projectId} AND up.user_id = ${user.id})`] : [])),
     with: {
       project: { columns: { id: true, name: true } },
     },
@@ -171,23 +184,7 @@ episodes.get("/:id/clips", async (c) => {
     return c.json({ status: "error", message: "Episode not found", data: null }, 404)
   }
 
-  const clips = await db.query.clips.findMany({
-    where: (clips, { eq }) => eq(clips.episodeId, episodeId),
-    columns: {
-      id: true,
-      name: true,
-      description: true,
-      status: true,
-      deadline: true,
-      currentRevisionId: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-    with: {
-      owner: { columns: { id: true, displayName: true, pictureUrl: true } },
-    },
-    orderBy: (clips, { asc }) => [asc(clips.createdAt)],
-  })
+  const result = await ClipService.listClips({ db, user, episodeId, q: query.q, limit: query.limit, offset: query.offset, sortBy: query.sortBy, sortOrder: query.sortOrder, status: c.req.query("status")?.split(",") });
 
   return c.json({
     status: "success",
@@ -195,7 +192,8 @@ episodes.get("/:id/clips", async (c) => {
     data: {
       episode: { id: episode.id, episodeNo: episode.episodeNo, name: episode.name },
       project: episode.project,
-      clips,
+      ...paginated(result.items, result.total, query.page, query.limit, { episode: { id: episode.id, episodeNo: episode.episodeNo, name: episode.name }, project: episode.project }),
     },
   })
+  } catch (error) { return handleApiError(c, error); }
 })
