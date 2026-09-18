@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { createDb, users as usersSchema } from "@clipflow/db";
 import { UserTransaction } from "./user-transaction";
 import { logActivity } from "./activity-logger";
@@ -6,10 +6,19 @@ import { logActivity } from "./activity-logger";
 export class UserService {
   constructor(private db: ReturnType<typeof createDb>) {}
 
-  async listUsers() {
-    return await this.db.query.users.findMany({
-      orderBy: (u: any, { desc }: any) => [desc(u.lastActiveAt)],
-    });
+  async listUsers(query: { q?: string; role?: string; isActive?: boolean; limit: number; offset: number; sortBy: "displayName" | "lastActiveAt" | "createdAt"; sortOrder: "asc" | "desc" }) {
+    const conditions: any[] = [];
+    if (query.q) conditions.push(or(ilike(usersSchema.displayName, `%${query.q}%`), ilike(usersSchema.lineUserId, `%${query.q}%`)));
+    if (query.role) conditions.push(eq(usersSchema.role, query.role as any));
+    if (query.isActive !== undefined) conditions.push(eq(usersSchema.isActive, query.isActive));
+    const whereClause = conditions.length ? and(...conditions) : undefined;
+    const order = query.sortOrder === "asc" ? asc : desc;
+    const sortColumns = { displayName: usersSchema.displayName, lastActiveAt: usersSchema.lastActiveAt, createdAt: usersSchema.createdAt };
+    const [items, countRows] = await Promise.all([
+      this.db.query.users.findMany({ where: whereClause, orderBy: [order(sortColumns[query.sortBy]), order(usersSchema.id)], limit: query.limit, offset: query.offset }),
+      this.db.select({ count: sql<number>`count(*)` }).from(usersSchema).where(whereClause),
+    ]);
+    return { items, total: Number(countRows[0]?.count || 0) };
   }
 
   async getUser(id: string) {

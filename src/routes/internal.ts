@@ -8,9 +8,11 @@ import { linkUserRichMenu } from "../services/notifications/line/line.client";
 
 export type InternalEnv = {
   DATABASE_URL: string;
+  INTERNAL_API_SECRET?: string;
   INTERNAL_SECRET?: string;
   LINE_CHANNEL_ACCESS_TOKEN?: string;
   NODE_ENV?: string;
+  ENVIRONMENT?: string;
 };
 
 type InternalVars = { db: ReturnType<typeof createDb> };
@@ -26,10 +28,10 @@ export const internalRouter = new Hono<{
  * - Development (NODE_ENV=development): bypasses if no INTERNAL_SECRET env is set
  */
 internalRouter.use("*", async (c: any, next: any) => {
-  const secret = c.env?.INTERNAL_SECRET;
-  const isDev = !secret; // treat "no secret configured" as dev bypass
+  const secret = c.env?.INTERNAL_API_SECRET || c.env?.INTERNAL_SECRET;
+  const isDev = c.env?.NODE_ENV === "development" || c.env?.ENVIRONMENT === "development";
 
-  if (!isDev) {
+  if (!isDev || secret) {
     const provided = c.req.header("x-internal-secret");
     if (!provided || provided !== secret) {
       return c.json(

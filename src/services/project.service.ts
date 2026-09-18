@@ -158,17 +158,19 @@ export class ProjectService {
   /**
    * Members management
    */
-  async getProjectMembers(projectId: string) {
-    const projectMembers = await this.db.query.userProjects.findMany({
-      where: eq(userProjectsSchema.projectId, projectId),
-    });
-    const memberIds = projectMembers.map((m) => m.userId);
-    if (memberIds.length === 0) return [];
-
-    return await this.db.query.users.findMany({
-      where: inArray(usersSchema.id, memberIds),
-      columns: { id: true, displayName: true, pictureUrl: true, role: true },
-    });
+  async getProjectMembers(projectId: string, query: { q?: string; role?: string; isActive?: boolean; limit: number; offset: number; sortBy: "displayName" | "lastActiveAt"; sortOrder: "asc" | "desc" }) {
+    const conditions: any[] = [eq(userProjectsSchema.projectId, projectId)];
+    if (query.q) conditions.push(ilike(usersSchema.displayName, `%${query.q}%`));
+    if (query.role) conditions.push(eq(usersSchema.role, query.role as any));
+    if (query.isActive !== undefined) conditions.push(eq(usersSchema.isActive, query.isActive));
+    const whereClause = and(...conditions);
+    const order = query.sortOrder === "asc" ? asc : desc;
+    const sortColumn = query.sortBy === "displayName" ? usersSchema.displayName : usersSchema.lastActiveAt;
+    const [items, countRows] = await Promise.all([
+      this.db.select({ id: usersSchema.id, displayName: usersSchema.displayName, pictureUrl: usersSchema.pictureUrl, role: usersSchema.role, isActive: usersSchema.isActive, lastActiveAt: usersSchema.lastActiveAt }).from(userProjectsSchema).innerJoin(usersSchema, eq(usersSchema.id, userProjectsSchema.userId)).where(whereClause).orderBy(order(sortColumn), order(usersSchema.id)).limit(query.limit).offset(query.offset),
+      this.db.select({ count: sql<number>`count(*)` }).from(userProjectsSchema).innerJoin(usersSchema, eq(usersSchema.id, userProjectsSchema.userId)).where(whereClause),
+    ]);
+    return { items, total: Number(countRows[0]?.count || 0) };
   }
 
   async addProjectMember(projectId: string, userId: string) {

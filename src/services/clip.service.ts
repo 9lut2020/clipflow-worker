@@ -13,7 +13,7 @@ export const ClipService = {
     projectId,
     videoSizeId,
     q,
-    scheduledState,
+    scheduledState,  
     postingState,
     scheduledFrom,
     scheduledTo,
@@ -43,7 +43,7 @@ export const ClipService = {
     deadlineTo?: string;
     createdFrom?: string;
     createdTo?: string;
-    sortBy?: "createdAt" | "updatedAt" | "deadline" | "scheduledPublishAt" | "name";
+    sortBy?: "createdAt" | "updatedAt" | "deadline" | "scheduledPublishAt" | "name" | "project";
     sortOrder?: "asc" | "desc";
     user?: { id: string; role: "USER" | "REVIEWER" | "ADMIN" };
   }) {
@@ -77,6 +77,7 @@ export const ClipService = {
       deadline: clipsSchema.deadline,
       scheduledPublishAt: clipsSchema.scheduledPublishAt,
       name: clipsSchema.name,
+      project: sql`(select p.name from projects p where p.id = ${clipsSchema.projectId})`,
     };
     const order = sortOrder === "asc" ? asc : desc;
 

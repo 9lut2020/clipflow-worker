@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import {
   clips as clipsSchema,
   revisions as revisionsSchema,
@@ -8,31 +8,29 @@ import { logActivity } from "./activity-logger";
 import { NotificationService } from "./notifications/notification.service";
 
 export const RevisionService = {
-  async getRevisionsForClip({ db, clipId }: { db: any; clipId: string }) {
-    return db.query.revisions
-      .findMany({
-        where: (rev: any, { eq }: any) => eq(rev.clipId, clipId),
+  async getRevisionsForClip({ db, clipId, submittedBy, from, to, limit = 20, offset = 0, sortBy = "submittedAt", sortOrder = "desc" }: { db: any; clipId: string; submittedBy?: string; from?: string; to?: string; limit?: number; offset?: number; sortBy?: "revisionNo" | "submittedAt"; sortOrder?: "asc" | "desc" }) {
+    const conditions: any[] = [eq(revisionsSchema.clipId, clipId)];
+    if (submittedBy) conditions.push(eq(revisionsSchema.submittedBy, submittedBy));
+    if (from) conditions.push(gte(revisionsSchema.submittedAt, new Date(`${from}T00:00:00+07:00`)));
+    if (to) conditions.push(lte(revisionsSchema.submittedAt, new Date(`${to}T23:59:59+07:00`)));
+    const where = and(...conditions);
+    const order = sortOrder === "asc" ? asc : desc;
+    const sortColumn = sortBy === "revisionNo" ? revisionsSchema.revisionNo : revisionsSchema.submittedAt;
+    const [items, totals] = await Promise.all([
+      db.query.revisions.findMany({
+        where,
         with: {
           submittedBy: {
             columns: { id: true, displayName: true, pictureUrl: true },
           },
-          reviews: {
-            with: {
-              reviewer: {
-                columns: {
-                  id: true,
-                  displayName: true,
-                  pictureUrl: true,
-                  role: true,
-                },
-              },
-            },
-            orderBy: (reviews: any, { desc }: any) => [desc(reviews.createdAt)],
-          },
         },
-        orderBy: (rev: any, { desc }: any) => [desc(rev.revisionNo)],
-      })
-      .catch(() => []);
+        orderBy: [order(sortColumn), order(revisionsSchema.id)],
+        limit,
+        offset,
+      }),
+      db.select({ count: sql<number>`count(*)` }).from(revisionsSchema).where(where),
+    ]);
+    return { items, total: Number(totals[0]?.count || 0) };
   },
 
   async submitRevision({
@@ -162,21 +160,13 @@ export const RevisionService = {
           columns: { id: true, displayName: true, pictureUrl: true },
         },
         clip: {
-          columns: { id: true, name: true, status: true },
-        },
-        reviews: {
-          with: {
-            reviewer: {
-              columns: { id: true, displayName: true, pictureUrl: true },
-            },
-          },
-          orderBy: (reviews: any, { desc }: any) => [desc(reviews.createdAt)],
+          columns: { id: true, name: true, status: true, ownerId: true },
         },
       },
     });
   },
 
-  async getReviewsForRevision({ db, id }: { db: any; id: string }) {
+  async getReviewsForRevision({ db, id, status, reviewerId, from, to, limit = 20, offset = 0, sortOrder = "desc" }: { db: any; id: string; status?: string[]; reviewerId?: string; from?: string; to?: string; limit?: number; offset?: number; sortOrder?: "asc" | "desc" }) {
     const revision = await db.query.revisions.findFirst({
       where: (rev: any, { eq }: any) => eq(rev.id, id),
       columns: { id: true, revisionNo: true, clipId: true },
@@ -186,17 +176,25 @@ export const RevisionService = {
       return null;
     }
 
-    const allReviews = await db.query.reviews.findMany({
-      where: (reviews: any, { eq }: any) => eq(reviews.revisionId, id),
+    const conditions: any[] = [eq(reviewsSchema.revisionId, id)];
+    if (status?.length) conditions.push(sql`${reviewsSchema.status} = any(${status})`);
+    if (reviewerId) conditions.push(eq(reviewsSchema.reviewerId, reviewerId));
+    if (from) conditions.push(gte(reviewsSchema.createdAt, new Date(`${from}T00:00:00+07:00`)));
+    if (to) conditions.push(lte(reviewsSchema.createdAt, new Date(`${to}T23:59:59+07:00`)));
+    const where = and(...conditions);
+    const order = sortOrder === "asc" ? asc : desc;
+    const [items, totals] = await Promise.all([db.query.reviews.findMany({
+      where,
       with: {
         reviewer: {
           columns: { id: true, displayName: true, pictureUrl: true, role: true },
         },
       },
-      orderBy: (reviews: any, { desc }: any) => [desc(reviews.createdAt)],
-    });
-
-    return allReviews;
+      orderBy: [order(reviewsSchema.createdAt), order(reviewsSchema.id)],
+      limit,
+      offset,
+    }), db.select({ count: sql<number>`count(*)` }).from(reviewsSchema).where(where)]);
+    return { items, total: Number(totals[0]?.count || 0), revision };
   },
 
   async submitReview({

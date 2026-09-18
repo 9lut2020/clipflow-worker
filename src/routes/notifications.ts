@@ -40,13 +40,6 @@ const PushSubscriptionSchema = z.object({
   }),
 });
 
-notifications.get("/push/public-key", async (c) => {
-  if (!c.env.VAPID_PUBLIC_KEY) {
-    return c.json({ status: "error", message: "Web Push is not configured", data: null }, 503);
-  }
-  return c.json({ status: "success", message: "VAPID public key retrieved", data: c.env.VAPID_PUBLIC_KEY });
-});
-
 notifications.post("/push/subscribe", zValidator("json", PushSubscriptionSchema), async (c) => {
   const user = c.get("user" as any);
   if (!user) return c.json({ status: "error", message: "Unauthorized", data: null }, 401);

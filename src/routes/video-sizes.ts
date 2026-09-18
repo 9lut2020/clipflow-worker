@@ -1,7 +1,8 @@
 import { Hono } from "hono";
-import { eq, asc } from "drizzle-orm";
+import { and, eq, asc, desc, count, ilike, or, sql } from "drizzle-orm";
 import { createDb, videoSizes, clips } from "@clipflow/db";
 import { adminOnly } from "../middleware/role";
+import { handleApiError, paginated, parseListQuery, parseOptionalBoolean } from "../lib/api-contract";
 
 export const videoSizesRouter = new Hono<{
   Bindings: { DATABASE_URL: string };
@@ -9,8 +10,25 @@ export const videoSizesRouter = new Hono<{
 }>();
 
 videoSizesRouter.get("/", async (c) => {
-  const rows = await c.get("db").select().from(videoSizes).orderBy(asc(videoSizes.name));
-  return c.json({ status: "success", data: rows });
+  try {
+    const query = parseListQuery(c, { allowedSort: ["name", "width", "height", "createdAt"] as const, defaultSort: "name" });
+    const filters: any[] = [];
+    if (query.q) filters.push(ilike(videoSizes.name, `%${query.q}%`));
+    const isActive = parseOptionalBoolean(c.req.query("isActive"));
+    if (isActive !== undefined) filters.push(eq(videoSizes.isActive, isActive));
+    const orientation = c.req.query("orientation");
+    if (orientation === "portrait") filters.push(sql`${videoSizes.height} > ${videoSizes.width}`);
+    if (orientation === "landscape") filters.push(sql`${videoSizes.width} > ${videoSizes.height}`);
+    if (orientation === "square") filters.push(eq(videoSizes.width, videoSizes.height));
+    const where = filters.length ? and(...filters) : undefined;
+    const sortColumns = { name: videoSizes.name, width: videoSizes.width, height: videoSizes.height, createdAt: videoSizes.createdAt };
+    const order = query.sortOrder === "asc" ? asc : desc;
+    const [rows, totals] = await Promise.all([
+      c.get("db").select().from(videoSizes).where(where).orderBy(order(sortColumns[query.sortBy]), order(videoSizes.id)).limit(query.limit).offset(query.offset),
+      c.get("db").select({ count: count() }).from(videoSizes).where(where),
+    ]);
+    return c.json({ status: "success", message: "Video sizes retrieved successfully", data: paginated(rows, Number(totals[0]?.count || 0), query.page, query.limit) });
+  } catch (error) { return handleApiError(c, error); }
 });
 
 videoSizesRouter.post("/", adminOnly, async (c) => {
