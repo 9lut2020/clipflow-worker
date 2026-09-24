@@ -3,6 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
+# This Worker performs several round trips to Neon on most authenticated
+# requests. Let Cloudflare run it closer to the observed database path.
+[placement]
+mode = "smart"
+
 # RealtimeHub is no longer used by the application. This migration removes
 # the legacy Durable Object class when the next deployment is applied.
 [[migrations]]
@@ -11,6 +16,14 @@ deleted_classes = ["RealtimeHub"]
 
 [vars]
 ENVIRONMENT = "development"
+
+# ---- Database acceleration ----
+# Reuse the existing Cloudflare Hyperdrive config for Neon. The Worker keeps
+# DATABASE_URL as a local-development fallback; production traffic uses this
+# pooled connection string to avoid repeated origin connection setup.
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "759487ab447d492ba8ee3262cb52d2e9"
 
 # ---- Queues ----
 [[queues.producers]]

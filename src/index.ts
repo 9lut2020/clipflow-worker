@@ -17,11 +17,11 @@ import { adminRouter } from "./routes/admin";
 import { videoSizesRouter } from "./routes/video-sizes";
 import { publishSchedulesRouter } from "./routes/publish-schedules";
 import { internalRouter } from "./routes/internal";
-import { publicRouter } from "./routes/public";
 import { aggregateDailyMetrics } from "./cron/analytics-aggregator";
 
 export type Env = {
   DATABASE_URL: string;
+  HYPERDRIVE?: { connectionString: string };
   LINE_CHANNEL_ACCESS_TOKEN: string;
   LINE_CHANNEL_SECRET: string;
   LINE_LIFF_ID: string;
@@ -61,7 +61,7 @@ app.use("*", async (c: any, next: any) => {
       "x-request-id",
       "x-requested-with",
     ],
-    exposeHeaders: ["Content-Length"],
+    exposeHeaders: ["Content-Length", "Server-Timing", "x-request-id"],
     maxAge: 86400,
     credentials: true,
   });
@@ -75,10 +75,23 @@ app.use("*", async (c: any, next: any) => {
   await next();
 });
 
+// Surface backend time in the browser Network panel without logging every
+// request or exposing database details. It makes slow endpoints actionable.
+app.use("*", async (c: any, next: any) => {
+  const startedAt = performance.now();
+  await next();
+  const existing = c.res.headers.get("Server-Timing");
+  const appTiming = `app;dur=${Math.round(performance.now() - startedAt)}`;
+  c.header("Server-Timing", existing ? `${existing}, ${appTiming}` : appTiming);
+});
+
 // Inject DB instance
 app.use("*", async (c: any, next: any) => {
   if (!c.get("db")) {
-    const db = createDb(c.env.DATABASE_URL);
+    // Hyperdrive pools the Neon connection in production. DATABASE_URL stays
+    // as the fallback for local development and existing test environments.
+    const connectionString = c.env.HYPERDRIVE?.connectionString || c.env.DATABASE_URL;
+    const db = createDb(connectionString);
     c.set("db", db);
   }
   await next();
@@ -274,9 +287,6 @@ app.post("/webhook/line", async (c: any) => {
     return c.text("OK", 200);
   }
 });
-
-// ─── Public API (no auth) ──────────────────────────────────────────────────
-app.route("/api/public", publicRouter);
 
 // ─── Internal API (x-internal-secret guard, no user auth) ──────────────────
 app.route("/api/internal", internalRouter);
