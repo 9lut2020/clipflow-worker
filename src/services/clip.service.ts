@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, notInArray, or, sql } from "drizzle-orm";
-import { clips as clipsSchema } from "@clipflow/db";
+import { clipPublishSchedules, clips as clipsSchema, episodes, projects, publishedPosts, revisions, users, videoSizes } from "@clipflow/db";
 
 export const ClipService = {
   async listClips({
@@ -79,37 +79,58 @@ export const ClipService = {
       deadline: clipsSchema.deadline,
       scheduledPublishAt: clipsSchema.scheduledPublishAt,
       name: clipsSchema.name,
-      project: sql`(select p.name from projects p where p.id = ${clipsSchema.projectId})`,
+      project: projects.name,
     };
     const order = sortOrder === "asc" ? asc : desc;
 
-    // Select stable IDs first, then hydrate each page row with the same
-    // primary-key query used by the detail endpoint. In the Worker runtime,
-    // Drizzle's relational findMany could return a stale snapshot immediately
-    // after a mutation even though PostgreSQL had committed the change.
-    const [pageRows, countRows] = await Promise.all([
-      db
-        .select({ id: clipsSchema.id })
-        .from(clipsSchema)
+    // List endpoints must never hydrate each row with another query.  The old
+    // implementation did 2 + N database round trips and was the primary cause
+    // of /tasks and /admin/publish timeouts.
+    const postCounts = db.$with("post_counts").as(
+      db.select({ clipId: publishedPosts.clipId, count: sql<number>`count(*)::int` })
+        .from(publishedPosts).groupBy(publishedPosts.clipId),
+    );
+    const [rows, countRows] = await Promise.all([
+      db.with(postCounts).select({
+        id: clipsSchema.id, name: clipsSchema.name, description: clipsSchema.description,
+        status: clipsSchema.status, platform: clipsSchema.platform, videoSizeId: clipsSchema.videoSizeId,
+        deadline: clipsSchema.deadline, scheduledPublishAt: clipsSchema.scheduledPublishAt,
+        currentRevisionId: clipsSchema.currentRevisionId, createdAt: clipsSchema.createdAt, updatedAt: clipsSchema.updatedAt,
+        projectId: projects.id, projectName: projects.name,
+        episodeId: episodes.id, episodeNo: episodes.episodeNo, episodeName: episodes.name,
+        ownerId: users.id, ownerName: users.displayName, ownerPictureUrl: users.pictureUrl,
+        videoSizeName: videoSizes.name, videoSizeWidth: videoSizes.width, videoSizeHeight: videoSizes.height,
+        scheduleId: clipPublishSchedules.id, scheduleSlotId: clipPublishSchedules.slotId,
+        scheduleDate: clipPublishSchedules.publishDate, scheduleTime: clipPublishSchedules.publishTime,
+        scheduleStatus: clipPublishSchedules.status, scheduleRepeat: clipPublishSchedules.isRepeat, scheduleNote: clipPublishSchedules.note,
+        revisionDriveUrl: revisions.driveUrl, revisionNo: revisions.revisionNo,
+        publishedPostCount: sql<number>`coalesce(${postCounts.count}, 0)`,
+      }).from(clipsSchema)
+        .innerJoin(projects, eq(clipsSchema.projectId, projects.id))
+        .innerJoin(episodes, eq(clipsSchema.episodeId, episodes.id))
+        .innerJoin(users, eq(clipsSchema.ownerId, users.id))
+        .leftJoin(videoSizes, eq(clipsSchema.videoSizeId, videoSizes.id))
+        .leftJoin(clipPublishSchedules, eq(clipPublishSchedules.clipId, clipsSchema.id))
+        .leftJoin(revisions, eq(revisions.id, clipsSchema.currentRevisionId))
+        .leftJoin(postCounts, eq(postCounts.clipId, clipsSchema.id))
         .where(whereClause)
         .orderBy(order(sortColumns[sortBy]), order(clipsSchema.id))
-        .limit(limit ?? 20)
-        .offset(offset ?? 0),
+        .limit(limit ?? 20).offset(offset ?? 0),
       db.select({ count: sql<number>`count(*)` }).from(clipsSchema).where(whereClause),
     ]);
-    // Use a separate client for the relation hydration. The Worker/Hyperdrive
-    // client used for pagination can otherwise hold an older read snapshot
-    // immediately after a successful mutation.
-    const readDb = hydrationDb || db;
-    const items = await Promise.all(
-      pageRows.map(async ({ id }: { id: string }) => {
-        // Use the exact read shape that powers GET /clips/:id. This avoids
-        // divergence between the detail and paginated list consistency paths.
-        return ClipService.getClip({ db: readDb, id, user });
-      }),
-    );
-
-    return { items: items.filter(Boolean), total: Number(countRows[0]?.count || 0) };
+    const items = rows.map((row: any) => ({
+      id: row.id, name: row.name, description: row.description, status: row.status, platform: row.platform,
+      videoSizeId: row.videoSizeId, deadline: row.deadline, scheduledPublishAt: row.scheduledPublishAt,
+      currentRevisionId: row.currentRevisionId, createdAt: row.createdAt, updatedAt: row.updatedAt,
+      project: { id: row.projectId, name: row.projectName },
+      episode: { id: row.episodeId, episodeNo: row.episodeNo, name: row.episodeName },
+      owner: { id: row.ownerId, displayName: row.ownerName, pictureUrl: row.ownerPictureUrl },
+      videoSize: row.videoSizeName ? { id: row.videoSizeId, name: row.videoSizeName, width: row.videoSizeWidth, height: row.videoSizeHeight } : null,
+      publishSchedule: row.scheduleId ? { id: row.scheduleId, slotId: row.scheduleSlotId, publishDate: row.scheduleDate, publishTime: row.scheduleTime, status: row.scheduleStatus, isRepeat: row.scheduleRepeat, note: row.scheduleNote } : null,
+      currentRevision: row.revisionDriveUrl ? { id: row.currentRevisionId, driveUrl: row.revisionDriveUrl, revisionNo: row.revisionNo } : null,
+      publishedPosts: Array.from({ length: Number(row.publishedPostCount) }, () => ({})),
+    }));
+    return { items, total: Number(countRows[0]?.count || 0) };
   },
 
   async getClip({ db, id, user }: { db: any; id: string; user?: { id: string; role: string } }) {

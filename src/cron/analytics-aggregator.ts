@@ -4,7 +4,10 @@ import type { Env } from "../index";
 
 export async function aggregateDailyMetrics(env: Env) {
   console.log("[CRON] Starting daily metrics aggregation");
-  const db = createDb(env.HYPERDRIVE?.connectionString || env.DATABASE_URL);
+  // Use the same direct Neon connection as request handlers. Mixing the
+  // legacy Hyperdrive path with the Worker WebSocket driver left aggregates
+  // stale or missing even when raw events were recorded successfully.
+  const db = createDb(env.DATABASE_URL);
 
   try {
     // 1. DAU (Daily Active Users)
