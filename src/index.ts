@@ -85,12 +85,23 @@ app.use("*", async (c: any, next: any) => {
   c.header("Server-Timing", existing ? `${existing}, ${appTiming}` : appTiming);
 });
 
+// API responses are user- and role-scoped. Never let a CDN or browser reuse a
+// pre-mutation response, otherwise a successful write appears to revert after
+// navigation or refresh.
+app.use("/api/*", async (c: any, next: any) => {
+  await next();
+  c.header("Cache-Control", "private, no-store, max-age=0, must-revalidate");
+  const vary = c.res.headers.get("Vary");
+  c.header("Vary", vary ? `${vary}, x-user-id` : "x-user-id");
+});
+
 // Inject DB instance
 app.use("*", async (c: any, next: any) => {
   if (!c.get("db")) {
-    // Hyperdrive pools the Neon connection in production. DATABASE_URL stays
-    // as the fallback for local development and existing test environments.
-    const connectionString = c.env.HYPERDRIVE?.connectionString || c.env.DATABASE_URL;
+    // Use Neon's stateless HTTP driver for request/response CRUD. It provides
+    // read-after-write consistency, unlike the stale session we observed via
+    // the current Hyperdrive + pg setup.
+    const connectionString = c.env.DATABASE_URL;
     const db = createDb(connectionString);
     c.set("db", db);
   }

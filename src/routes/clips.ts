@@ -26,6 +26,7 @@ clips.get("/", async (c: Context) => {
     const statuses = parseMultiValue(c, "status");
     const result = await ClipService.listClips({
       db: c.get("db"),
+      hydrationDb: createDb(c.env.DATABASE_URL),
       user: c.get("user") as any,
       episodeId: c.req.query("episodeId"), projectId: c.req.query("projectId"), ownerId: c.req.query("ownerId"), videoSizeId: c.req.query("videoSizeId"),
       status: statuses.length ? statuses : undefined,

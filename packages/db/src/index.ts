@@ -1,12 +1,12 @@
-import { Pool } from "pg";
-import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-serverless";
 import * as schema from "./schema";
 
 export * from "./schema";
 
 export function createDb(databaseUrl: string) {
-  // Hyperdrive owns the durable pool. A pg client must be scoped to the Worker
-  // request; reusing a pg Pool across requests can retain an already-closed
-  // Workerd socket and cause intermittent 500 responses.
+  // Use Neon's Worker-compatible WebSocket client directly. Unlike the HTTP
+  // driver it supports the transactions required by submissions and reviews.
+  neonConfig.webSocketConstructor = WebSocket;
   return drizzle(new Pool({ connectionString: databaseUrl }), { schema });
 }

@@ -24,6 +24,7 @@ export const ClipService = {
     sortBy = "createdAt",
     sortOrder = "desc",
     user,
+    hydrationDb,
   }: {
     db: any;
     episodeId?: string;
@@ -46,6 +47,7 @@ export const ClipService = {
     sortBy?: "createdAt" | "updatedAt" | "deadline" | "scheduledPublishAt" | "name" | "project";
     sortOrder?: "asc" | "desc";
     user?: { id: string; role: "USER" | "REVIEWER" | "ADMIN" };
+    hydrationDb?: any;
   }) {
     const conditions: any[] = [];
     if (excludeApproved) conditions.push(notInArray(clipsSchema.status, ["APPROVED", "PUBLISHED", "CANCELLED"]));
@@ -81,63 +83,33 @@ export const ClipService = {
     };
     const order = sortOrder === "asc" ? asc : desc;
 
-    const [items, countRows] = await Promise.all([
-      db.query.clips.findMany({
-        where: whereClause,
-        columns: {
-          id: true,
-          name: true,
-          description: true,
-          status: true,
-          platform: true,
-          videoSizeId: true,
-          deadline: true,
-          scheduledPublishAt: true,
-          driveUrl: true,
-          currentRevisionId: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-        with: {
-          owner: { columns: { id: true, displayName: true, pictureUrl: true } },
-          episode: { columns: { id: true, episodeNo: true, name: true } },
-          project: { columns: { id: true, name: true } },
-          videoSize: { columns: { id: true, name: true, width: true, height: true } },
-          // List screens only need the posted platforms. Do not serialize
-          // captions/URLs/timestamps for every clip in a paginated response.
-          publishedPosts: { columns: { id: true, platform: true } },
-          currentRevision: {
-            columns: { id: true, driveUrl: true, revisionNo: true },
-            with: {
-              reviews: {
-                columns: { id: true, status: true, comment: true, createdAt: true },
-                with: {
-                  reviewer: { columns: { id: true, displayName: true, pictureUrl: true } },
-                },
-                orderBy: (r: any, { desc }: any) => [desc(r.createdAt)],
-                limit: 1,
-              },
-            },
-          },
-          publishSchedule: {
-            columns: {
-              id: true,
-              slotId: true,
-              publishDate: true,
-              publishTime: true,
-              status: true,
-              isRepeat: true,
-              note: true,
-            },
-          },
-        },
-        limit: limit ?? 20,
-        offset: offset ?? 0,
-        orderBy: [order(sortColumns[sortBy]), order(clipsSchema.id)],
-      }),
+    // Select stable IDs first, then hydrate each page row with the same
+    // primary-key query used by the detail endpoint. In the Worker runtime,
+    // Drizzle's relational findMany could return a stale snapshot immediately
+    // after a mutation even though PostgreSQL had committed the change.
+    const [pageRows, countRows] = await Promise.all([
+      db
+        .select({ id: clipsSchema.id })
+        .from(clipsSchema)
+        .where(whereClause)
+        .orderBy(order(sortColumns[sortBy]), order(clipsSchema.id))
+        .limit(limit ?? 20)
+        .offset(offset ?? 0),
       db.select({ count: sql<number>`count(*)` }).from(clipsSchema).where(whereClause),
     ]);
-    return { items, total: Number(countRows[0]?.count || 0) };
+    // Use a separate client for the relation hydration. The Worker/Hyperdrive
+    // client used for pagination can otherwise hold an older read snapshot
+    // immediately after a successful mutation.
+    const readDb = hydrationDb || db;
+    const items = await Promise.all(
+      pageRows.map(async ({ id }: { id: string }) => {
+        // Use the exact read shape that powers GET /clips/:id. This avoids
+        // divergence between the detail and paginated list consistency paths.
+        return ClipService.getClip({ db: readDb, id, user });
+      }),
+    );
+
+    return { items: items.filter(Boolean), total: Number(countRows[0]?.count || 0) };
   },
 
   async getClip({ db, id, user }: { db: any; id: string; user?: { id: string; role: string } }) {

@@ -220,7 +220,8 @@ projects.get("/:id/clips", async (c: any) => {
 
   try {
     const query = parseListQuery(c, { allowedSort: ["createdAt", "updatedAt", "deadline", "scheduledPublishAt", "name"] as const, defaultSort: "createdAt" });
-    const data = await service.getProjectClips(id, user, { limit: query.limit, offset: query.offset, sortBy: query.sortBy, sortOrder: query.sortOrder, q: query.q, episodeId: c.req.query("episodeId"), ownerId: c.req.query("ownerId"), status: c.req.query("status")?.split(",") });
+    const hydrationDb = createDb(c.env.DATABASE_URL);
+    const data = await service.getProjectClips(id, user, { limit: query.limit, offset: query.offset, sortBy: query.sortBy, sortOrder: query.sortOrder, q: query.q, episodeId: c.req.query("episodeId"), ownerId: c.req.query("ownerId"), status: c.req.query("status")?.split(",") }, hydrationDb);
 
     if (!data) {
       return c.json(
@@ -319,6 +320,22 @@ projects.post(
     const db = c.get("db");
     const projectId = c.req.param("id") as string;
     const { clips } = c.req.valid("json");
+
+    const clearsRequiredOwner = clips.some(
+      (clip: any) =>
+        clip.id && !clip.id.toString().startsWith("new-") && clip.ownerId === "",
+    );
+    if (clearsRequiredOwner) {
+      return c.json(
+        {
+          status: "error",
+          code: "VALIDATION_ERROR",
+          message: "A saved clip must have an assignee",
+          data: null,
+        },
+        422,
+      );
+    }
 
     try {
       // 1. Pre-fetch all valid Users, Project info, existing Episodes and Clips in parallel
