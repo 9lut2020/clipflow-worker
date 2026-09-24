@@ -154,7 +154,7 @@ publishSchedulesRouter.get("/summary", async (c) => {
     }).from(publishedPosts).groupBy(publishedPosts.clipId),
   );
   const posted = sql<number>`coalesce(${postCounts.platformCount}, 0)`;
-  const [row] = await db.select({
+  const [row] = await db.with(postCounts).select({
     unscheduled: sql<number>`count(*) filter (where ${clips.scheduledPublishAt} is null)`,
     scheduled: sql<number>`count(*) filter (where ${clips.scheduledPublishAt} is not null)`,
     overdue: sql<number>`count(*) filter (where ${clips.scheduledPublishAt} < now() and ${posted} = 0)`,
