@@ -4,6 +4,7 @@ import {
   clipPublishSchedules,
   clips,
   createDb,
+  publishedPosts,
   projectPublishSlots,
   projects,
 } from "@clipflow/db";
@@ -82,15 +83,84 @@ async function getSuggestion(db: AppDb, clipId: string, startDate?: string, rese
   throw new Error("NO_AVAILABLE_SLOT");
 }
 
+async function getBulkSuggestions(db: AppDb, clipIds: string[], startDate?: string) {
+  const firstDate = startDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate)
+    ? startDate
+    : bangkokDateString();
+  const endDate = addDays(firstDate, 370);
+  const uniqueIds = [...new Set(clipIds)];
+  const foundClips = await db.query.clips.findMany({
+    where: inArray(clips.id, uniqueIds),
+    columns: { id: true, name: true, projectId: true },
+    with: { project: { columns: { id: true, name: true } } },
+  });
+  const clipsById = new Map(foundClips.map((clip: any) => [clip.id, clip]));
+  const projectIds = [...new Set(foundClips.map((clip: any) => clip.projectId))];
+  const [allSlots, occupiedRows] = projectIds.length ? await Promise.all([
+    db.select().from(projectPublishSlots).where(and(inArray(projectPublishSlots.projectId, projectIds), eq(projectPublishSlots.isActive, true))).orderBy(asc(projectPublishSlots.dayOfWeek), asc(projectPublishSlots.publishTime)),
+    db.select({ projectId: clipPublishSchedules.projectId, publishDate: clipPublishSchedules.publishDate }).from(clipPublishSchedules).where(and(inArray(clipPublishSchedules.projectId, projectIds), gte(clipPublishSchedules.publishDate, firstDate), lte(clipPublishSchedules.publishDate, endDate), eq(clipPublishSchedules.status, "SCHEDULED"))),
+  ]) : [[], []];
+
+  const slotsByProject = new Map<string, any[]>();
+  for (const slot of allSlots as any[]) slotsByProject.set(slot.projectId, [...(slotsByProject.get(slot.projectId) || []), slot]);
+  const occupiedByProject = new Map<string, Set<string>>();
+  for (const row of occupiedRows as any[]) {
+    if (!occupiedByProject.has(row.projectId)) occupiedByProject.set(row.projectId, new Set());
+    occupiedByProject.get(row.projectId)!.add(row.publishDate);
+  }
+
+  const suggestions: any[] = [];
+  const skipped: Array<{ clipId: string; reason: string }> = [];
+  const now = new Date();
+  const messages: Record<string, string> = {
+    CLIP_NOT_FOUND: "ไม่พบคลิป",
+    NO_PROJECT_SLOTS: "รายการยังไม่ได้ตั้งวันและเวลาประจำ",
+    NO_AVAILABLE_SLOT: "ไม่พบช่องว่างในช่วง 1 ปีถัดไป",
+  };
+
+  for (const clipId of clipIds) {
+    const clip = clipsById.get(clipId);
+    if (!clip) { skipped.push({ clipId, reason: messages.CLIP_NOT_FOUND }); continue; }
+    const slots = slotsByProject.get(clip.projectId) || [];
+    if (!slots.length) { skipped.push({ clipId, reason: messages.NO_PROJECT_SLOTS }); continue; }
+    const occupied = occupiedByProject.get(clip.projectId) || new Set<string>();
+    let suggestion: any;
+    for (let offset = 0; offset <= 370; offset += 1) {
+      const publishDate = addDays(firstDate, offset);
+      if (occupied.has(publishDate)) continue;
+      const slot = slots.find((item: any) => item.dayOfWeek === dayOfWeek(publishDate));
+      if (!slot) continue;
+      const scheduledAt = new Date(`${publishDate}T${slot.publishTime}+07:00`);
+      if (scheduledAt.getTime() <= now.getTime()) continue;
+      suggestion = { clip, slot, publishDate, publishTime: slot.publishTime, scheduledAt: scheduledAt.toISOString() };
+      occupied.add(publishDate);
+      occupiedByProject.set(clip.projectId, occupied);
+      break;
+    }
+    if (suggestion) suggestions.push(suggestion);
+    else skipped.push({ clipId, reason: messages.NO_AVAILABLE_SLOT });
+  }
+  return { suggestions, skipped };
+}
+
 publishSchedulesRouter.get("/summary", async (c) => {
   const db = c.get("db");
+  // Aggregate published platforms once, then reuse the result for each
+  // summary bucket. This avoids four correlated published_posts scans per clip.
+  const postCounts = db.$with("post_counts").as(
+    db.select({
+      clipId: publishedPosts.clipId,
+      platformCount: sql<number>`count(distinct ${publishedPosts.platform})`.as("platform_count"),
+    }).from(publishedPosts).groupBy(publishedPosts.clipId),
+  );
+  const posted = sql<number>`coalesce(${postCounts.platformCount}, 0)`;
   const [row] = await db.select({
     unscheduled: sql<number>`count(*) filter (where ${clips.scheduledPublishAt} is null)`,
     scheduled: sql<number>`count(*) filter (where ${clips.scheduledPublishAt} is not null)`,
-    overdue: sql<number>`count(*) filter (where ${clips.scheduledPublishAt} < now() and (select count(*) from published_posts pp where pp.clip_id = ${clips.id}) = 0)`,
-    partial: sql<number>`count(*) filter (where (select count(distinct pp.platform) from published_posts pp where pp.clip_id = ${clips.id}) between 1 and 3)`,
-    completed: sql<number>`count(*) filter (where (select count(distinct pp.platform) from published_posts pp where pp.clip_id = ${clips.id}) >= 4)`,
-  }).from(clips).where(inArray(clips.status, ["APPROVED", "PUBLISHED"]));
+    overdue: sql<number>`count(*) filter (where ${clips.scheduledPublishAt} < now() and ${posted} = 0)`,
+    partial: sql<number>`count(*) filter (where ${posted} between 1 and 3)`,
+    completed: sql<number>`count(*) filter (where ${posted} >= 4)`,
+  }).from(clips).leftJoin(postCounts, eq(postCounts.clipId, clips.id)).where(inArray(clips.status, ["APPROVED", "PUBLISHED"]));
   return c.json({ status: "success", message: "Publish summary retrieved successfully", data: Object.fromEntries(Object.entries(row).map(([key, value]) => [key, Number(value)])) });
 });
 
@@ -192,7 +262,7 @@ publishSchedulesRouter.get("/queue", async (c) => {
     const [rows, totals] = await Promise.all([
       c.get("db").query.clipPublishSchedules.findMany({
         where,
-        with: { project: { columns: { id: true, name: true } }, slot: true, clip: { with: { episode: { columns: { id: true, episodeNo: true, name: true } }, owner: { columns: { id: true, displayName: true, pictureUrl: true } }, publishedPosts: true, currentRevision: { columns: { id: true, driveUrl: true, revisionNo: true } } } } },
+        with: { project: { columns: { id: true, name: true } }, slot: true, clip: { with: { episode: { columns: { id: true, episodeNo: true, name: true } }, owner: { columns: { id: true, displayName: true, pictureUrl: true } }, publishedPosts: { columns: { id: true, platform: true } }, currentRevision: { columns: { id: true, driveUrl: true, revisionNo: true } } } } },
         orderBy: [order(sortColumns[query.sortBy]), order(clipPublishSchedules.id)], limit: query.limit, offset: query.offset,
       }),
       c.get("db").select({ count: count() }).from(clipPublishSchedules).where(where),
@@ -221,24 +291,9 @@ publishSchedulesRouter.post("/suggest-bulk", adminOnly, async (c) => {
   const clipIds = Array.isArray(body.clipIds) ? body.clipIds.map(String) : [];
   if (!clipIds.length) return c.json({ status: "error", message: "clipIds are required" }, 400);
   if (clipIds.length > 100) return c.json({ status: "error", code: "VALIDATION_ERROR", message: "A maximum of 100 clips is allowed", data: null, errors: {} }, 400);
-  const reservedByProject = new Map<string, Set<string>>();
-  const suggestions: any[] = [];
-  const skipped: Array<{ clipId: string; reason: string }> = [];
-  const messages: Record<string, string> = {
-    CLIP_NOT_FOUND: "ไม่พบคลิป",
-    NO_PROJECT_SLOTS: "รายการยังไม่ได้ตั้งวันและเวลาประจำ",
-    NO_AVAILABLE_SLOT: "ไม่พบช่องว่างในช่วง 1 ปีถัดไป",
-  };
-  for (const clipId of clipIds) {
-    try {
-      const preview = await getSuggestion(c.get("db"), clipId, body.startDate, reservedByProject);
-      if (!reservedByProject.has(preview.clip.projectId)) reservedByProject.set(preview.clip.projectId, new Set());
-      reservedByProject.get(preview.clip.projectId)!.add(preview.publishDate);
-      suggestions.push(preview);
-    } catch (error: any) {
-      skipped.push({ clipId, reason: messages[error.message] || "ไม่สามารถแนะนำคิวได้" });
-    }
-  }
+  // Preload every clip, its recurring slots, and occupied dates. The old
+  // implementation made three database queries per clip (up to 300 queries).
+  const { suggestions, skipped } = await getBulkSuggestions(c.get("db"), clipIds, body.startDate);
   return c.json({ status: "success", data: { suggestions, skipped } });
 });
 

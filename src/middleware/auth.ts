@@ -20,7 +20,8 @@ declare module "hono" {
  * Database is the authoritative source of truth for user role & status.
  */
 export const authMiddleware = async (c: Context, next: Next) => {
-  // Bypass for health check only — /api/internal/* and /api/public/* are mounted before this middleware
+  // Internal routes are mounted before this middleware. Only the Worker health
+  // check remains unauthenticated on this app instance.
   if (c.req.path === "/" || c.req.path === "/api") {
     return next();
   }
@@ -28,6 +29,7 @@ export const authMiddleware = async (c: Context, next: Next) => {
   const userId = c.req.header("x-user-id");
 
   if (userId) {
+    const authStartedAt = performance.now();
     const db = c.get("db") as any;
 
     if (!db) {
@@ -50,6 +52,7 @@ export const authMiddleware = async (c: Context, next: Next) => {
         },
       })
       .catch(() => null);
+    c.header("Server-Timing", `auth;dur=${Math.round(performance.now() - authStartedAt)}`);
 
     if (!user || user.isActive === false) {
       return c.json(

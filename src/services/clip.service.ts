@@ -103,7 +103,9 @@ export const ClipService = {
           episode: { columns: { id: true, episodeNo: true, name: true } },
           project: { columns: { id: true, name: true } },
           videoSize: { columns: { id: true, name: true, width: true, height: true } },
-          publishedPosts: true,
+          // List screens only need the posted platforms. Do not serialize
+          // captions/URLs/timestamps for every clip in a paginated response.
+          publishedPosts: { columns: { id: true, platform: true } },
           currentRevision: {
             columns: { id: true, driveUrl: true, revisionNo: true },
             with: {
