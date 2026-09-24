@@ -15,7 +15,7 @@ tag = "remove-realtime-hub"
 deleted_classes = ["RealtimeHub"]
 
 [vars]
-ENVIRONMENT = "development"
+ENVIRONMENT = "production"
 
 # ---- Database acceleration ----
 # Reuse the existing Cloudflare Hyperdrive config for Neon. The Worker keeps

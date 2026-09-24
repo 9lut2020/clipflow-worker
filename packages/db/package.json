@@ -6,6 +6,9 @@
   "types": "./src/index.ts",
   "dependencies": {
     "drizzle-orm": "^0.36.0",
-    "@neondatabase/serverless": "^0.10.0"
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
   }
 }
