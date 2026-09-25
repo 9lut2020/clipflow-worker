@@ -90,29 +90,27 @@ export class UserService {
     role: "USER" | "REVIEWER" | "ADMIN",
     actorId: string | null,
   ) {
-    return await UserTransaction.execute(this.db, async (tx) => {
-      const [updated] = await tx
-        .update(usersSchema)
-        .set({ role, updatedAt: new Date() })
-        .where(eq(usersSchema.id, id))
-        .returning();
+    const [updated] = await this.db
+      .update(usersSchema)
+      .set({ role, updatedAt: new Date() })
+      .where(eq(usersSchema.id, id))
+      .returning();
 
-      if (!updated) return null;
+    if (!updated) return null;
 
-      await logActivity({
-        db: tx as any,
-        actorId,
-        action: "ROLE_CHANGED",
-        entityType: "user",
-        entityId: updated.id,
-        meta: {
-          targetName: updated.displayName,
-          newRole: role,
-        },
-      });
-
-      return updated;
+    await logActivity({
+      db: this.db,
+      actorId,
+      action: "ROLE_CHANGED",
+      entityType: "user",
+      entityId: updated.id,
+      meta: {
+        targetName: updated.displayName,
+        newRole: role,
+      },
     });
+
+    return updated;
   }
 
   async updateUserStatus(
@@ -120,29 +118,27 @@ export class UserService {
     isActive: boolean,
     actorId: string | null,
   ) {
-    return await UserTransaction.execute(this.db, async (tx) => {
-      const [updated] = await tx
-        .update(usersSchema)
-        .set({ isActive, updatedAt: new Date() })
-        .where(eq(usersSchema.id, id))
-        .returning();
+    const [updated] = await this.db
+      .update(usersSchema)
+      .set({ isActive, updatedAt: new Date() })
+      .where(eq(usersSchema.id, id))
+      .returning();
 
-      if (!updated) return null;
+    if (!updated) return null;
 
-      await logActivity({
-        db: tx as any,
-        actorId,
-        action: "STATUS_CHANGED",
-        entityType: "user",
-        entityId: updated.id,
-        meta: {
-          targetName: updated.displayName,
-          newStatus: isActive,
-        },
-      });
-
-      return updated;
+    await logActivity({
+      db: this.db,
+      actorId,
+      action: "STATUS_CHANGED",
+      entityType: "user",
+      entityId: updated.id,
+      meta: {
+        targetName: updated.displayName,
+        newStatus: isActive,
+      },
     });
+
+    return updated;
   }
 
   async getUserStats(id: string) {
