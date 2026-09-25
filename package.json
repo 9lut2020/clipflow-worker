@@ -11,6 +11,7 @@
     "deploy": "wrangler deploy",
     "type-check": "tsc --noEmit",
     "cf-typegen": "wrangler types",
+    "db:migrate": "tsx migrate.ts",
     "db:index": "tsx scripts/apply-performance-indexes.ts",
     "db:index:dry": "tsx scripts/apply-performance-indexes.ts --dry-run",
     "db:migrate:performance": "tsx scripts/apply-performance-indexes.ts"
