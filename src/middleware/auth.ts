@@ -1,6 +1,4 @@
 import type { Context, Next } from "hono";
-import { eq } from "drizzle-orm";
-import { users as usersSchema } from "@clipflow/db";
 
 export type AuthUser = {
   id: string;
@@ -34,7 +32,11 @@ export const authMiddleware = async (c: Context, next: Next) => {
 
     if (!db) {
       return c.json(
-        { status: "error", message: "Database connection unavailable", data: null },
+        {
+          status: "error",
+          message: "Database connection unavailable",
+          data: null,
+        },
         500,
       );
     }
@@ -52,22 +54,38 @@ export const authMiddleware = async (c: Context, next: Next) => {
         },
       })
       .catch(() => null);
-    c.header("Server-Timing", `auth;dur=${Math.round(performance.now() - authStartedAt)}`);
+    c.header(
+      "Server-Timing",
+      `auth;dur=${Math.round(performance.now() - authStartedAt)}`,
+    );
 
     if (!user || user.isActive === false) {
       return c.json(
-        { status: "error", message: "Unauthorized: Unknown or inactive user", data: null },
+        {
+          status: "error",
+          message: "Unauthorized: Unknown or inactive user",
+          data: null,
+        },
         401,
       );
     }
 
     let userRole = user.role as "USER" | "REVIEWER" | "ADMIN";
-    
+
     // Allow frontend to override role for bypass/mock users ONLY in development
     const isDevelopment = process.env.NODE_ENV === "development";
-    if (isDevelopment && user.lineUserId && (user.lineUserId.startsWith("bypass-") || user.lineUserId.startsWith("mock-"))) {
+    if (
+      isDevelopment &&
+      user.lineUserId &&
+      (user.lineUserId.startsWith("bypass-") ||
+        user.lineUserId.startsWith("mock-"))
+    ) {
       const headerRole = c.req.header("x-user-role");
-      if (headerRole === "ADMIN" || headerRole === "REVIEWER" || headerRole === "USER") {
+      if (
+        headerRole === "ADMIN" ||
+        headerRole === "REVIEWER" ||
+        headerRole === "USER"
+      ) {
         userRole = headerRole as any;
       }
     }
@@ -83,7 +101,10 @@ export const authMiddleware = async (c: Context, next: Next) => {
   }
 
   return c.json(
-    { status: "error", message: "Unauthorized: Missing user authentication headers" },
+    {
+      status: "error",
+      message: "Unauthorized: Missing user authentication headers",
+    },
     401,
   );
 };
