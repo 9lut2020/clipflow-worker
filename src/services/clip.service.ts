@@ -24,7 +24,6 @@ export const ClipService = {
     sortBy = "createdAt",
     sortOrder = "desc",
     user,
-    hydrationDb,
   }: {
     db: any;
     episodeId?: string;
@@ -47,7 +46,6 @@ export const ClipService = {
     sortBy?: "createdAt" | "updatedAt" | "deadline" | "scheduledPublishAt" | "name" | "project";
     sortOrder?: "asc" | "desc";
     user?: { id: string; role: "USER" | "REVIEWER" | "ADMIN" };
-    hydrationDb?: any;
   }) {
     const conditions: any[] = [];
     if (excludeApproved) conditions.push(notInArray(clipsSchema.status, ["APPROVED", "PUBLISHED", "CANCELLED"]));

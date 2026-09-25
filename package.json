@@ -10,7 +10,10 @@
     "build": "wrangler deploy --dry-run",
     "deploy": "wrangler deploy",
     "type-check": "tsc --noEmit",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "db:index": "tsx scripts/apply-performance-indexes.ts",
+    "db:index:dry": "tsx scripts/apply-performance-indexes.ts --dry-run",
+    "db:migrate:performance": "tsx scripts/apply-performance-indexes.ts"
   },
   "dependencies": {
     "@block65/webcrypto-web-push": "^2.0.0",

@@ -95,18 +95,15 @@ app.use("/api/*", async (c: any, next: any) => {
   c.header("Vary", vary ? `${vary}, x-user-id` : "x-user-id");
 });
 
-// Inject DB instance
-app.use("*", async (c: any, next: any) => {
-  if (!c.get("db")) {
-    // Use Neon's stateless HTTP driver for request/response CRUD. It provides
-    // read-after-write consistency, unlike the stale session we observed via
-    // the current Hyperdrive + pg setup.
-    const connectionString = c.env.DATABASE_URL;
-    const db = createDb(connectionString);
-    c.set("db", db);
-  }
+// Only persistent routes receive a DB instance. Health and other stateless
+// requests must not initialise database infrastructure.
+const injectDb = async (c: any, next: any) => {
+  if (!c.get("db")) c.set("db", createDb(c.env.DATABASE_URL));
   await next();
-});
+};
+
+app.use("/webhook/line", injectDb);
+app.use("/api/*", injectDb);
 
 // ─── Health Check ──────────────────────────────────────────────────────────
 app.get("/", (c: any) =>

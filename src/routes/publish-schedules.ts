@@ -169,6 +169,7 @@ publishSchedulesRouter.get("/items", async (c) => {
     const query = parseListQuery(c, { allowedSort: ["scheduledAt", "createdAt", "name", "project"] as const, defaultSort: "scheduledAt" });
     const scheduleState = c.req.query("scheduleState");
     const postingState = c.req.query("postingState");
+    const queryStartedAt = performance.now();
     const result = await ClipService.listClips({
       db: c.get("db"), q: query.q, projectId: c.req.query("projectId"), ownerId: c.req.query("ownerId"), status: ["APPROVED", "PUBLISHED"],
       scheduledState: scheduleState === "scheduled" || scheduleState === "unscheduled" || scheduleState === "overdue" ? scheduleState : undefined,
@@ -176,6 +177,9 @@ publishSchedulesRouter.get("/items", async (c) => {
       scheduledFrom: c.req.query("from"), scheduledTo: c.req.query("to"), limit: query.limit, offset: query.offset,
       sortBy: query.sortBy === "scheduledAt" ? "scheduledPublishAt" : query.sortBy, sortOrder: query.sortOrder,
     });
+    const existingTiming = c.res.headers.get("Server-Timing");
+    const queryTiming = `query;dur=${Math.round(performance.now() - queryStartedAt)}`;
+    c.header("Server-Timing", existingTiming ? `${existingTiming}, ${queryTiming}` : queryTiming);
     return c.json({ status: "success", message: "Publish items retrieved successfully", data: paginated(result.items, result.total, query.page, query.limit) });
   } catch (error) { return handleApiError(c, error); }
 });
