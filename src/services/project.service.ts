@@ -28,7 +28,7 @@ export class ProjectService {
     if (user.role === "USER") {
       conditions.push(eq(userProjectsSchema.userId, user.id));
       const whereClause = and(...conditions);
-      const [items, countRows] = await Promise.all([this.db
+      const items = await this.db
         .select({
           id: projectsSchema.id,
           name: projectsSchema.name,
@@ -45,27 +45,23 @@ export class ProjectService {
         )
         .where(whereClause)
         .orderBy(order(sortColumns[query.sortBy]), order(projectsSchema.id))
-        .limit(query.limit).offset(query.offset),
-        this.db.select({ count: sql<number>`count(*)` }).from(projectsSchema).innerJoin(userProjectsSchema, eq(userProjectsSchema.projectId, projectsSchema.id)).where(whereClause),
-      ]);
+        .limit(query.limit).offset(query.offset);
+        
+      const countRows = await this.db.select({ count: sql<number>`count(*)` }).from(projectsSchema).innerJoin(userProjectsSchema, eq(userProjectsSchema.projectId, projectsSchema.id)).where(whereClause);
       return { items, total: Number(countRows[0]?.count || 0) };
     }
 
     if (query.memberId && user.role === "ADMIN") {
       conditions.push(eq(userProjectsSchema.userId, query.memberId));
       const whereClause = and(...conditions);
-      const [items, countRows] = await Promise.all([
-        this.db.select({ id: projectsSchema.id, name: projectsSchema.name, description: projectsSchema.description, pictureUrl: projectsSchema.pictureUrl, isActive: projectsSchema.isActive, createdAt: projectsSchema.createdAt, updatedAt: projectsSchema.updatedAt }).from(projectsSchema).innerJoin(userProjectsSchema, eq(userProjectsSchema.projectId, projectsSchema.id)).where(whereClause).orderBy(order(sortColumns[query.sortBy]), order(projectsSchema.id)).limit(query.limit).offset(query.offset),
-        this.db.select({ count: sql<number>`count(*)` }).from(projectsSchema).innerJoin(userProjectsSchema, eq(userProjectsSchema.projectId, projectsSchema.id)).where(whereClause),
-      ]);
+      const items = await this.db.select({ id: projectsSchema.id, name: projectsSchema.name, description: projectsSchema.description, pictureUrl: projectsSchema.pictureUrl, isActive: projectsSchema.isActive, createdAt: projectsSchema.createdAt, updatedAt: projectsSchema.updatedAt }).from(projectsSchema).innerJoin(userProjectsSchema, eq(userProjectsSchema.projectId, projectsSchema.id)).where(whereClause).orderBy(order(sortColumns[query.sortBy]), order(projectsSchema.id)).limit(query.limit).offset(query.offset);
+      const countRows = await this.db.select({ count: sql<number>`count(*)` }).from(projectsSchema).innerJoin(userProjectsSchema, eq(userProjectsSchema.projectId, projectsSchema.id)).where(whereClause);
       return { items, total: Number(countRows[0]?.count || 0) };
     }
 
     const whereClause = and(...conditions);
-    const [items, countRows] = await Promise.all([
-      this.db.query.projects.findMany({ where: whereClause, orderBy: [order(sortColumns[query.sortBy]), order(projectsSchema.id)], limit: query.limit, offset: query.offset }),
-      this.db.select({ count: sql<number>`count(*)` }).from(projectsSchema).where(whereClause),
-    ]);
+    const items = await this.db.query.projects.findMany({ where: whereClause, orderBy: [order(sortColumns[query.sortBy]), order(projectsSchema.id)], limit: query.limit, offset: query.offset });
+    const countRows = await this.db.select({ count: sql<number>`count(*)` }).from(projectsSchema).where(whereClause);
     return { items, total: Number(countRows[0]?.count || 0) };
   }
 
@@ -92,10 +88,8 @@ export class ProjectService {
       where: (p: any, { eq }: any) => eq(p.id, id),
     });
     if (!project) return null;
-    const [episodeCount, clipCount] = await Promise.all([
-      this.db.select({ count: sql<number>`count(*)` }).from(episodesSchema).where(and(eq(episodesSchema.projectId, id), eq(episodesSchema.isActive, true))),
-      this.db.select({ count: sql<number>`count(*)` }).from(clipsSchema).where(eq(clipsSchema.projectId, id)),
-    ]);
+    const episodeCount = await this.db.select({ count: sql<number>`count(*)` }).from(episodesSchema).where(and(eq(episodesSchema.projectId, id), eq(episodesSchema.isActive, true)));
+    const clipCount = await this.db.select({ count: sql<number>`count(*)` }).from(clipsSchema).where(eq(clipsSchema.projectId, id));
     return { ...project, _count: { episodes: Number(episodeCount[0]?.count || 0), clips: Number(clipCount[0]?.count || 0) } };
   }
 
