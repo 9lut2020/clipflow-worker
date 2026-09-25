@@ -6,6 +6,14 @@ export type AuthUser = {
   name?: string;
 };
 
+interface CachedUser {
+  user: any;
+  expiresAt: number;
+}
+const userCache = new Map<string, CachedUser>();
+const CACHE_TTL = 30 * 1000; // 30 seconds
+
+
 declare module "hono" {
   interface ContextVariableMap {
     user: AuthUser;
@@ -41,19 +49,34 @@ export const authMiddleware = async (c: Context, next: Next) => {
       );
     }
 
-    // Safely query user without throwing UUID syntax errors
-    const user = await db.query.users
-      .findFirst({
-        where: (u: any, { eq }: any) => eq(u.id, userId),
-        columns: {
-          id: true,
-          role: true,
-          displayName: true,
-          isActive: true,
-          lineUserId: true,
-        },
-      })
-      .catch(() => null);
+    // Check cache first
+    const now = Date.now();
+    const cached = userCache.get(userId);
+    let user;
+
+    if (cached && cached.expiresAt > now) {
+      user = cached.user;
+    } else {
+      // Safely query user without throwing UUID syntax errors
+      user = await db.query.users
+        .findFirst({
+          where: (u: any, { eq }: any) => eq(u.id, userId),
+          columns: {
+            id: true,
+            role: true,
+            displayName: true,
+            isActive: true,
+            lineUserId: true,
+          },
+        })
+        .catch(() => null);
+        
+      if (user) {
+        // Cleanup cache occasionally to prevent memory leaks in the isolate
+        if (userCache.size > 1000) userCache.clear();
+        userCache.set(userId, { user, expiresAt: now + CACHE_TTL });
+      }
+    }
     c.header(
       "Server-Timing",
       `auth;dur=${Math.round(performance.now() - authStartedAt)}`,

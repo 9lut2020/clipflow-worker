@@ -403,19 +403,20 @@ projects.post(
         }[]
       >();
 
+      // 1. Ensure all required episodes exist sequentially to avoid duplicate inserts
       for (const clipData of clips) {
-        // 1. Ensure episode exists (using in-memory map)
-        let episode = episodeMap.get(clipData.episodeNo);
-        if (!episode) {
+        if (!episodeMap.has(clipData.episodeNo)) {
           const [newEp] = await db
             .insert(episodesSchema)
             .values({ projectId, episodeNo: clipData.episodeNo })
             .returning();
-          episode = newEp;
-          episodeMap.set(clipData.episodeNo, episode);
+          episodeMap.set(clipData.episodeNo, newEp);
         }
+      }
 
-        // 2. Upsert clip & track task assignment for LINE notification
+      // 2. Perform clip inserts and updates concurrently for maximum performance
+      const clipPromises = clips.map(async (clipData: any) => {
+        const episode = episodeMap.get(clipData.episodeNo);
         let assignedOwnerId = "";
         let isNewlyAssigned = false;
         let clipIdForNotify = "";
@@ -448,13 +449,8 @@ projects.post(
         } else {
           // Create new
           const hasExplicitOwner = isValidUser(clipData.ownerId);
-          const finalOwnerId = hasExplicitOwner
-            ? clipData.ownerId
-            : validUserId;
-
-          const finalCreatedBy = isValidUser(clipData.createdBy)
-            ? clipData.createdBy
-            : validUserId;
+          const finalOwnerId = hasExplicitOwner ? clipData.ownerId : validUserId;
+          const finalCreatedBy = isValidUser(clipData.createdBy) ? clipData.createdBy : validUserId;
 
           const [insertedClip] = await db
             .insert(clipsSchema)
@@ -476,16 +472,22 @@ projects.post(
           isNewlyAssigned = hasExplicitOwner;
         }
 
-        // Group assigned task for batch notification
-        if (isNewlyAssigned && assignedOwnerId) {
-          if (!assignmentsByOwner.has(assignedOwnerId)) {
-            assignmentsByOwner.set(assignedOwnerId, []);
+        return { isNewlyAssigned, assignedOwnerId, clipIdForNotify, clipName: clipData.name, description: clipData.description };
+      });
+
+      const results = await Promise.all(clipPromises);
+
+      // Group assigned tasks for batch notification
+      for (const res of results) {
+        if (res.isNewlyAssigned && res.assignedOwnerId) {
+          if (!assignmentsByOwner.has(res.assignedOwnerId)) {
+            assignmentsByOwner.set(res.assignedOwnerId, []);
           }
-          assignmentsByOwner.get(assignedOwnerId)!.push({
-            clipId: clipIdForNotify,
-            clipName: clipData.name,
+          assignmentsByOwner.get(res.assignedOwnerId)!.push({
+            clipId: res.clipIdForNotify,
+            clipName: res.clipName,
             projectName: projectObj?.name,
-            description: clipData.description,
+            description: res.description,
           });
         }
       }
