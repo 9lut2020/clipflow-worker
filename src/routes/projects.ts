@@ -220,8 +220,7 @@ projects.get("/:id/clips", async (c: any) => {
 
   try {
     const query = parseListQuery(c, { allowedSort: ["createdAt", "updatedAt", "deadline", "scheduledPublishAt", "name"] as const, defaultSort: "createdAt" });
-    const hydrationDb = createDb(c.env.DATABASE_URL);
-    const data = await service.getProjectClips(id, user, { limit: query.limit, offset: query.offset, sortBy: query.sortBy, sortOrder: query.sortOrder, q: query.q, episodeId: c.req.query("episodeId"), ownerId: c.req.query("ownerId"), status: c.req.query("status")?.split(",") }, hydrationDb);
+    const data = await service.getProjectClips(id, user, { limit: query.limit, offset: query.offset, sortBy: query.sortBy, sortOrder: query.sortOrder, q: query.q, episodeId: c.req.query("episodeId"), ownerId: c.req.query("ownerId"), status: c.req.query("status")?.split(",") });
 
     if (!data) {
       return c.json(

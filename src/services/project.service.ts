@@ -131,7 +131,7 @@ export class ProjectService {
   /**
    * Get project clips with access control
    */
-  async getProjectClips(id: string, user: User, query: any, hydrationDb?: any) {
+  async getProjectClips(id: string, user: User, query: any) {
     if (user.role === "USER") {
       const membership = await this.db.query.userProjects.findFirst({
         where: and(
@@ -151,7 +151,7 @@ export class ProjectService {
 
     if (!project) return null;
 
-    const result = await ClipService.listClips({ db: this.db, hydrationDb, projectId: id, user: user as any, ...query });
+    const result = await ClipService.listClips({ db: this.db, projectId: id, user: user as any, ...query });
     return { project, ...result };
   }
 

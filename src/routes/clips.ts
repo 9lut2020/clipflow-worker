@@ -24,9 +24,9 @@ clips.get("/", async (c: Context) => {
   try {
     const query = parseListQuery(c, { allowedSort: ["createdAt", "updatedAt", "deadline", "scheduledPublishAt", "name"] as const, defaultSort: "createdAt" });
     const statuses = parseMultiValue(c, "status");
+    const queryStartedAt = performance.now();
     const result = await ClipService.listClips({
       db: c.get("db"),
-      hydrationDb: createDb(c.env.DATABASE_URL),
       user: c.get("user") as any,
       episodeId: c.req.query("episodeId"), projectId: c.req.query("projectId"), ownerId: c.req.query("ownerId"), videoSizeId: c.req.query("videoSizeId"),
       status: statuses.length ? statuses : undefined,
@@ -37,6 +37,9 @@ clips.get("/", async (c: Context) => {
       createdFrom: parseDate(c.req.query("createdFrom"), "createdFrom"), createdTo: parseDate(c.req.query("createdTo"), "createdTo"),
       q: query.q, limit: query.limit, offset: query.offset, sortBy: query.sortBy, sortOrder: query.sortOrder,
     });
+    const existingTiming = c.res.headers.get("Server-Timing");
+    const queryTiming = `query;dur=${Math.round(performance.now() - queryStartedAt)}`;
+    c.header("Server-Timing", existingTiming ? `${existingTiming}, ${queryTiming}` : queryTiming);
     return c.json({ status: "success", message: "Clips retrieved successfully", data: paginated(result.items, result.total, query.page, query.limit) });
   } catch (error) { return handleApiError(c, error); }
 });
