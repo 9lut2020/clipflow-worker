@@ -2,7 +2,8 @@ import { sql } from "drizzle-orm";
 import { createDb } from "@clipflow/db";
 
 async function main() {
-  const dbUrl = "postgresql://neondb_owner:npg_FDpVHg8a1cld@ep-long-shadow-azvybi45-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require";
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) throw new Error("DATABASE_URL is required.");
   const db = createDb(dbUrl);
 
   console.log("Running DDL Migrations on Neon DB...");
@@ -35,6 +36,30 @@ async function main() {
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS raw_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      event_name VARCHAR(255) NOT NULL,
+      user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      properties JSONB,
+      context JSONB,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_raw_events_created_at ON raw_events(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_raw_events_user_created_at ON raw_events(user_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS daily_metrics (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      date DATE NOT NULL,
+      metric_name VARCHAR(255) NOT NULL,
+      dimension VARCHAR(255) NOT NULL,
+      value NUMERIC NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_metrics_date_name_dimension
+      ON daily_metrics(date, metric_name, dimension);
+    CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(date DESC);
   `);
 
   console.log("🎉 NEON DB MIGRATION COMPLETE!");

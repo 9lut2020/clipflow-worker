@@ -1,23 +1,22 @@
-import { Pool, neonConfig } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-serverless";
+import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-http";
 import * as schema from "./schema";
 
 export * from "./schema";
 
-function buildDb(databaseUrl: string) {
-  neonConfig.webSocketConstructor = WebSocket;
-  return drizzle(new Pool({ connectionString: databaseUrl }), { schema });
-}
-
-// Worker isolates may serve multiple requests. Reusing the client avoids
-// allocating a new Neon pool for every request while keeping URLs isolated.
-const databaseClients = new Map<string, ReturnType<typeof buildDb>>();
+// Cloudflare Workers enforce strict per-request I/O isolation: a WebSocket
+// (Pool) created for request A cannot be reused by request B.  The HTTP
+// transport (neon()) avoids this entirely — every query is a stateless fetch,
+// so the module-level cache is safe to keep for deduplication without risking
+// cross-request I/O conflicts.
+const databaseClients = new Map<string, ReturnType<typeof drizzle>>();
 
 export function createDb(databaseUrl: string) {
   const existing = databaseClients.get(databaseUrl);
   if (existing) return existing;
 
-  const db = buildDb(databaseUrl);
+  const sql = neon(databaseUrl);
+  const db = drizzle(sql, { schema });
   databaseClients.set(databaseUrl, db);
   return db;
 }

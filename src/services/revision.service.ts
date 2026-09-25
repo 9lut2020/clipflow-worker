@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
+﻿import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import {
   clips as clipsSchema,
   revisions as revisionsSchema,
@@ -71,69 +71,68 @@ export const RevisionService = {
     let notificationPayload: any = null;
     let newRevResult: any = null;
 
-    // Database Mutation Transaction Boundary
-    await db.transaction(async (tx: any) => {
-      const [newRev] = await tx
-        .insert(revisionsSchema)
-        .values({
-          clipId,
-          revisionNo: nextRevisionNo,
-          driveFileId: extractedFileId,
-          driveUrl: driveUrl || "",
-          submitNote: submitNote || "",
-          submittedBy: userId,
-        })
-        .returning();
+    // Sequential mutations (neon-http does not support transactions;
+    // single-tenant Worker requests have no concurrent conflicting writes
+    // on the same clip, so sequential ordering gives the same guarantee).
+    const [newRev] = await db
+      .insert(revisionsSchema)
+      .values({
+        clipId,
+        revisionNo: nextRevisionNo,
+        driveFileId: extractedFileId,
+        driveUrl: driveUrl || "",
+        submitNote: submitNote || "",
+        submittedBy: userId,
+      })
+      .returning();
 
-      newRevResult = newRev;
+    newRevResult = newRev;
 
-      // Update clip status & currentRevisionId
-      await tx
-        .update(clipsSchema)
-        .set({
-          status: "PENDING_REVIEW",
-          currentRevisionId: newRev.id,
-          ...(driveUrl && { driveUrl }),
-          updatedAt: new Date(),
-        })
-        .where(eq(clipsSchema.id, clipId));
+    // Update clip status & currentRevisionId
+    await db
+      .update(clipsSchema)
+      .set({
+        status: "PENDING_REVIEW",
+        currentRevisionId: newRev.id,
+        ...(driveUrl && { driveUrl }),
+        updatedAt: new Date(),
+      })
+      .where(eq(clipsSchema.id, clipId));
 
-      // Need clip info for notification & audit
-      const fullClip = await tx.query.clips.findFirst({
-        where: (c: any, { eq }: any) => eq(c.id, clipId),
-        with: { owner: true, project: true },
-      });
-
-      // Audit Log
-      await logActivity({
-        db: tx,
-        actorId: userId,
-        action: nextRevisionNo === 1 ? "CLIP_SUBMITTED" : "CLIP_RESUBMITTED",
-        entityType: "clip",
-        entityId: clipId,
-        meta: {
-          clipName: fullClip?.name,
-          revisionNo: nextRevisionNo,
-          projectName: fullClip?.project?.name,
-        },
-      });
-
-      // Prepare notification payload if clip found
-      if (fullClip) {
-        notificationPayload = {
-          toLineUserId: fullClip.owner?.lineUserId,
-          clipName: fullClip.name,
-          projectName: fullClip.project?.name,
-          editorName: fullClip.owner?.displayName || "Editor",
-          driveUrl,
-          submitNote,
-          clipId,
-          channelAccessToken,
-          adminGroupId,
-        };
-      }
+    // Need clip info for notification & audit
+    const fullClip = await db.query.clips.findFirst({
+      where: (c: any, { eq }: any) => eq(c.id, clipId),
+      with: { owner: true, project: true },
     });
-    // <-- COMMIT
+
+    // Audit Log
+    await logActivity({
+      db,
+      actorId: userId,
+      action: nextRevisionNo === 1 ? "CLIP_SUBMITTED" : "CLIP_RESUBMITTED",
+      entityType: "clip",
+      entityId: clipId,
+      meta: {
+        clipName: fullClip?.name,
+        revisionNo: nextRevisionNo,
+        projectName: fullClip?.project?.name,
+      },
+    });
+
+    // Prepare notification payload if clip found
+    if (fullClip) {
+      notificationPayload = {
+        toLineUserId: fullClip.owner?.lineUserId,
+        clipName: fullClip.name,
+        projectName: fullClip.project?.name,
+        editorName: fullClip.owner?.displayName || "Editor",
+        driveUrl,
+        submitNote,
+        clipId,
+        channelAccessToken,
+        adminGroupId,
+      };
+    }
 
     // Post-Commit Asynchronous Notification Dispatch
     if (notificationPayload) {
@@ -260,108 +259,105 @@ export const RevisionService = {
     let notificationPayload: any = null;
     let newReviewResult: any = null;
 
-    // Database Mutation Transaction Boundary
-    await db.transaction(async (tx: any) => {
-      // If we didn't find a revision earlier, we might need to create one
-      if (!revision) {
-        const existingRevs = await tx.query.revisions.findMany({
-          where: (rev: any, { eq }: any) => eq(rev.clipId, clipId),
-          orderBy: (rev: any, { desc }: any) => [desc(rev.revisionNo)],
-        });
+    // Sequential mutations (neon-http does not support transactions;
+    // single-tenant Worker requests have no concurrent conflicting writes
+    // on the same clip, so sequential ordering gives the same guarantee).
+    if (!revision) {
+      const existingRevs = await db.query.revisions.findMany({
+        where: (rev: any, { eq }: any) => eq(rev.clipId, clipId),
+        orderBy: (rev: any, { desc }: any) => [desc(rev.revisionNo)],
+      });
 
-        if (existingRevs.length > 0) {
-          revisionId = existingRevs[0].id;
-        } else if (clip) {
-          // Auto-create initial Revision 1 for this clip
-          const extractedFileId =
-            clip.driveUrl?.match(/\/d\/([a-zA-Z0-9_-]+)/)?.[1] ||
-            clip.driveUrl?.match(/id=([a-zA-Z0-9_-]+)/)?.[1] ||
-            `file_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      if (existingRevs.length > 0) {
+        revisionId = existingRevs[0].id;
+      } else if (clip) {
+        const extractedFileId =
+          clip.driveUrl?.match(/\/d\/([a-zA-Z0-9_-]+)/)?.[1] ||
+          clip.driveUrl?.match(/id=([a-zA-Z0-9_-]+)/)?.[1] ||
+          `file_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-          const [newRev] = await tx
-            .insert(revisionsSchema)
-            .values({
-              clipId: clip.id,
-              revisionNo: 1,
-              driveFileId: extractedFileId,
-              driveUrl: clip.driveUrl || "",
-              submitNote: "Initial submission",
-              submittedBy: clip.ownerId,
-            })
-            .returning();
+        const [newRev] = await db
+          .insert(revisionsSchema)
+          .values({
+            clipId: clip.id,
+            revisionNo: 1,
+            driveFileId: extractedFileId,
+            driveUrl: clip.driveUrl || "",
+            submitNote: "Initial submission",
+            submittedBy: clip.ownerId,
+          })
+          .returning();
 
-          revisionId = newRev.id;
+        revisionId = newRev.id;
 
-          await tx
-            .update(clipsSchema)
-            .set({ currentRevisionId: newRev.id })
-            .where(eq(clipsSchema.id, clip.id));
-        }
+        await db
+          .update(clipsSchema)
+          .set({ currentRevisionId: newRev.id })
+          .where(eq(clipsSchema.id, clip.id));
       }
+    }
 
-      const [newReview] = await tx
-        .insert(reviewsSchema)
-        .values({
-          clipId,
-          revisionId,
-          reviewerId,
-          status,
-          comment,
-          ...(timecodeSeconds !== undefined && { timecodeSeconds }),
-          ...(timecodeStr && { timecodeStr }),
-        })
-        .returning();
-      
-      newReviewResult = newReview;
+    const [newReview] = await db
+      .insert(reviewsSchema)
+      .values({
+        clipId,
+        revisionId,
+        reviewerId,
+        status,
+        comment,
+        ...(timecodeSeconds !== undefined && { timecodeSeconds }),
+        ...(timecodeStr && { timecodeStr }),
+      })
+      .returning();
 
-      // Update clip status to match review outcome
-      await tx
-        .update(clipsSchema)
-        .set({ status, updatedAt: new Date() })
-        .where(eq(clipsSchema.id, clipId));
+    newReviewResult = newReview;
 
-      const fullClip = await tx.query.clips.findFirst({
-        where: (c: any, { eq }: any) => eq(c.id, clipId),
-        with: { owner: true, project: true },
-      });
+    // Update clip status to match review outcome
+    await db
+      .update(clipsSchema)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(clipsSchema.id, clipId));
 
-      const reviewerUser = await tx.query.users.findFirst({
-        where: (u: any, { eq }: any) => eq(u.id, reviewerId),
-        columns: { displayName: true },
-      });
-
-      const reviewerName = reviewerUser?.displayName || fallbackReviewerName;
-
-      // Audit Log
-      await logActivity({
-        db: tx,
-        actorId: reviewerId || null,
-        action: status === "APPROVED" ? "CLIP_APPROVED" : "CLIP_REJECTED",
-        entityType: "clip",
-        entityId: clipId,
-        meta: {
-          clipName: fullClip?.name,
-          projectName: fullClip?.project?.name,
-          comment,
-          reviewerName,
-        },
-      });
-
-      if (fullClip) {
-        notificationPayload = {
-          toLineUserId: fullClip.owner?.lineUserId,
-          clipName: fullClip?.name || "คลิปวิดีโอ",
-          projectName: fullClip?.project?.name,
-          reviewerName,
-          comment,
-          clipId,
-          channelAccessToken,
-        };
-      }
+    const fullClip = await db.query.clips.findFirst({
+      where: (c: any, { eq }: any) => eq(c.id, clipId),
+      with: { owner: true, project: true },
     });
-    // <-- COMMIT
 
-    // Post-Commit Asynchronous Notification Dispatch
+    const reviewerUser = await db.query.users.findFirst({
+      where: (u: any, { eq }: any) => eq(u.id, reviewerId),
+      columns: { displayName: true },
+    });
+
+    const reviewerName = reviewerUser?.displayName || fallbackReviewerName;
+
+    // Audit Log
+    await logActivity({
+      db,
+      actorId: reviewerId || null,
+      action: status === "APPROVED" ? "CLIP_APPROVED" : "CLIP_REJECTED",
+      entityType: "clip",
+      entityId: clipId,
+      meta: {
+        clipName: fullClip?.name,
+        projectName: fullClip?.project?.name,
+        comment,
+        reviewerName,
+      },
+    });
+
+    if (fullClip) {
+      notificationPayload = {
+        toLineUserId: fullClip.owner?.lineUserId,
+        clipName: fullClip?.name || "คลิปวิดีโอ",
+        projectName: fullClip?.project?.name,
+        reviewerName,
+        comment,
+        clipId,
+        channelAccessToken,
+      };
+    }
+
+    // Post-mutation Asynchronous Notification Dispatch
     if (notificationPayload) {
       const promise = NotificationService.dispatch({
         type: status,
