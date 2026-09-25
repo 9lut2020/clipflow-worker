@@ -85,7 +85,7 @@ export const ClipService = {
     // implementation did 2 + N database round trips and was the primary cause
     // of /tasks and /admin/publish timeouts.
     const postCounts = db.$with("post_counts").as(
-      db.select({ clipId: publishedPosts.clipId, count: sql<number>`count(*)::int` })
+      db.select({ clipId: publishedPosts.clipId, count: sql<number>`count(*)::int`.as("count") })
         .from(publishedPosts).groupBy(publishedPosts.clipId),
     );
     const [rows, countRows] = await Promise.all([
