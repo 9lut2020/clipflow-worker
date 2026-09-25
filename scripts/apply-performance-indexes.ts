@@ -11,6 +11,10 @@ function databaseUrl() {
 
 async function main() {
   const migrationPath = path.resolve("packages/db/migrations/0012_safe_performance_indexes.sql");
+  if (!fs.existsSync(migrationPath)) {
+    console.warn("Performance-index migration is not present in this revision; skipping index application.");
+    return;
+  }
   const statements = fs.readFileSync(migrationPath, "utf8")
     .split(";")
     .map((statement) => statement.replace(/--[^\n]*/g, "").trim())
