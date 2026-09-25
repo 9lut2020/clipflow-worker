@@ -363,6 +363,13 @@ clips.get("/:id/published-posts", adminOnly, async (c: Context) => {
   try {
     const db = c.get("db");
     const clipId = c.req.param("id") as string;
+    const clip = await db.query.clips.findFirst({
+      where: (row: any, { eq: equal }: any) => equal(row.id, clipId),
+      columns: { id: true },
+    });
+    if (!clip) {
+      return c.json({ status: "error", code: "NOT_FOUND", message: "Clip not found", data: null, errors: {} }, 404);
+    }
     const query = parseListQuery(c, {
       allowedSort: ["publishedAt"] as const,
       defaultSort: "publishedAt",

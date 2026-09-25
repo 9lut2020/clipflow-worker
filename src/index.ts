@@ -103,11 +103,19 @@ const injectDb = async (c: any, next: any) => {
 };
 
 app.use("/webhook/line", injectDb);
-app.use("/api/*", injectDb);
+app.use("/api/*", async (c: any, next: any) => {
+  if (c.req.path === "/api/health") return next();
+  return injectDb(c, next);
+});
 
 // ─── Health Check ──────────────────────────────────────────────────────────
 app.get("/", (c: any) =>
   c.json({ status: "ok", service: "clipflow-worker", version: "1.0.0" }),
+);
+
+// Liveness probe. Deliberately avoids database, authentication, and external I/O.
+app.get("/api/health", (c: any) =>
+  c.json({ status: "ok", service: "clipflow-api", timestamp: new Date().toISOString() }),
 );
 
 // ─── LINE Webhook (Public route to capture Group ID on join/message) ───────

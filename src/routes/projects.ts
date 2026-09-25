@@ -584,6 +584,13 @@ projects.get("/:id/members", adminOnly, async (c) => {
   const projectId = c.req.param("id") as string;
 
   try {
+    const project = await db.query.projects.findFirst({
+      where: (row: any, { eq: equal }: any) => equal(row.id, projectId),
+      columns: { id: true },
+    });
+    if (!project) {
+      return c.json({ status: "error", code: "NOT_FOUND", message: "Project not found", data: null, errors: {} }, 404);
+    }
     const query = parseListQuery(c, {
       allowedSort: ["displayName", "lastActiveAt"] as const,
       defaultSort: "displayName",
