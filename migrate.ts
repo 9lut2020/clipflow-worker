@@ -35,8 +35,11 @@ async function main() {
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
     );
+  `);
+  await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
   `);
+  
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS raw_events (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -46,9 +49,15 @@ async function main() {
       context JSONB,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
     );
+  `);
+  await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_raw_events_created_at ON raw_events(created_at DESC);
+  `);
+  await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_raw_events_user_created_at ON raw_events(user_id, created_at DESC);
+  `);
 
+  await db.execute(sql`
     CREATE TABLE IF NOT EXISTS daily_metrics (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       date DATE NOT NULL,
@@ -57,9 +66,51 @@ async function main() {
       value NUMERIC NOT NULL,
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
     );
+  `);
+  await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS uq_daily_metrics_date_name_dimension
       ON daily_metrics(date, metric_name, dimension);
+  `);
+  await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_daily_metrics_date ON daily_metrics(date DESC);
+  `);
+
+  // New Assets and Checklists
+  console.log("Adding new Enums and Tables...");
+  await db.execute(sql`
+    DO $$ BEGIN
+      CREATE TYPE asset_category AS ENUM ('LOGO', 'BGM', 'FONT', 'TEMPLATE', 'OTHER');
+    EXCEPTION
+      WHEN duplicate_object THEN null;
+    END $$;
+  `);
+
+  await db.execute(sql`ALTER TABLE clips ADD COLUMN IF NOT EXISTS checklist_data JSONB;`);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS assets (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name VARCHAR(255) NOT NULL,
+      description TEXT,
+      category asset_category NOT NULL,
+      file_url TEXT NOT NULL,
+      is_active BOOLEAN DEFAULT TRUE NOT NULL,
+      created_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    );
+  `);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS checklists (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+      text TEXT NOT NULL,
+      "order" INTEGER DEFAULT 0 NOT NULL,
+      is_active BOOLEAN DEFAULT TRUE NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    );
   `);
 
   console.log("🎉 NEON DB MIGRATION COMPLETE!");

@@ -9,14 +9,18 @@ export * from "./schema";
 // transport (neon()) avoids this entirely — every query is a stateless fetch,
 // so the module-level cache is safe to keep for deduplication without risking
 // cross-request I/O conflicts.
-const databaseClients = new Map<string, ReturnType<typeof drizzle>>();
+const databaseClients = new Map<string, ReturnType<typeof initDb>>();
+
+function initDb(databaseUrl: string) {
+  const sql = neon(databaseUrl);
+  return drizzle(sql, { schema });
+}
 
 export function createDb(databaseUrl: string) {
   const existing = databaseClients.get(databaseUrl);
   if (existing) return existing;
 
-  const sql = neon(databaseUrl);
-  const db = drizzle(sql, { schema });
+  const db = initDb(databaseUrl);
   databaseClients.set(databaseUrl, db);
   return db;
 }
