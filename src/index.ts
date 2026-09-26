@@ -17,6 +17,8 @@ import { adminRouter } from "./routes/admin";
 import { videoSizesRouter } from "./routes/video-sizes";
 import { publishSchedulesRouter } from "./routes/publish-schedules";
 import { internalRouter } from "./routes/internal";
+import { assetsRouter } from "./routes/assets";
+import { checklistsRouter } from "./routes/checklists";
 import { aggregateDailyMetrics } from "./cron/analytics-aggregator";
 
 export type Env = {
@@ -323,6 +325,8 @@ api.route("/analytics", analyticsRouter);
 api.route("/admin", adminRouter);
 api.route("/video-sizes", videoSizesRouter);
 api.route("/publish-schedules", publishSchedulesRouter);
+api.route("/assets", assetsRouter);
+api.route("/checklists", checklistsRouter);
 
 app.route("/api", api);
 

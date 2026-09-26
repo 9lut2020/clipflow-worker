@@ -36,6 +36,14 @@ export const reviewStatusEnum = pgEnum("review_status", [
   "APPROVED",
 ]);
 
+export const assetCategoryEnum = pgEnum("asset_category", [
+  "LOGO",
+  "BGM",
+  "FONT",
+  "TEMPLATE",
+  "OTHER",
+]);
+
 export const activityActionEnum = pgEnum("activity_action", [
   "CLIP_SUBMITTED",
   "CLIP_RESUBMITTED",
@@ -201,6 +209,7 @@ export const clips = pgTable("clips", {
   status: clipStatusEnum("status").default("DRAFT").notNull(),
   platform: varchar("platform", { length: 50 }).default("TIKTOK").notNull(),
   videoSizeId: uuid("video_size_id").references(() => videoSizes.id, { onDelete: "set null" }),
+  checklistData: jsonb("checklist_data"),
   deadline: timestamp("deadline", { withTimezone: true }),
   scheduledPublishAt: timestamp("scheduled_publish_at", { withTimezone: true }),
   currentRevisionId: uuid("current_revision_id"),
@@ -525,5 +534,41 @@ export const pushSubscriptionsRelations = relations(pushSubscriptions, (helpers)
   user: helpers.one(users, {
     fields: [pushSubscriptions.userId],
     references: [users.id],
+  }),
+}));
+
+export const assets = pgTable("assets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  category: assetCategoryEnum("category").notNull(),
+  fileUrl: text("file_url").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdById: uuid("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const checklists = pgTable("checklists", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  order: integer("order").default(0).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const assetsRelations = relations(assets, (helpers) => ({
+  createdBy: helpers.one(users, {
+    fields: [assets.createdById],
+    references: [users.id],
+  }),
+}));
+
+export const checklistsRelations = relations(checklists, (helpers) => ({
+  project: helpers.one(projects, {
+    fields: [checklists.projectId],
+    references: [projects.id],
   }),
 }));
