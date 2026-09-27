@@ -8,11 +8,7 @@ compatibility_flags = ["nodejs_compat"]
 [placement]
 mode = "smart"
 
-# RealtimeHub is no longer used by the application. This migration removes
-# the legacy Durable Object class when the next deployment is applied.
-[[migrations]]
-tag = "remove-realtime-hub"
-deleted_classes = ["RealtimeHub"]
+
 
 [vars]
 ENVIRONMENT = "production"
