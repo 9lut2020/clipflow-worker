@@ -35,10 +35,10 @@ export const ClipBatchCreateSchema = z.object({
       description: z.string().optional().nullable(),
       platform: z.enum(["TIKTOK", "YOUTUBE", "FB_REEL", "IG_SQUARE", "OTHER"]).optional(),
       episodeNo: z.number().int().positive("Episode number must be positive"),
-      ownerId: z.string().optional(),
+      ownerId: z.string().optional().nullable(),
       // Empty values are normalized to null by the batch route; UUID values
       // persist the global video size selected in the spreadsheet.
-      videoSizeId: z.string().uuid().optional().or(z.literal("")),
+      videoSizeId: z.string().uuid().optional().nullable().or(z.literal("")),
       createdBy: z.string().optional(),
       deadline: z.string().optional().nullable(),
     })
