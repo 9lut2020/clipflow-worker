@@ -573,10 +573,10 @@ projects.post(
         message: "Clips batch updated successfully",
         data: assignmentsByOwner.size,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Batch update error:", error);
       return c.json(
-        { status: "error", message: "Failed to update clips", data: null },
+        { status: "error", message: error?.message || "Failed to update clips", data: null, stack: error?.stack },
         500,
       );
     }
