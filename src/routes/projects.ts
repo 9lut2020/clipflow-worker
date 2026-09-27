@@ -576,7 +576,7 @@ projects.post(
     } catch (error: any) {
       console.error("Batch update error:", error);
       return c.json(
-        { status: "error", message: error?.message || "Failed to update clips", data: null, stack: error?.stack },
+        { status: "error", message: "Failed to update clips", data: null },
         500,
       );
     }
