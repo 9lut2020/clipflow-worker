@@ -201,11 +201,9 @@ export const clips = pgTable("clips", {
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
   ownerId: uuid("owner_id")
-    .references(() => users.id)
-    .notNull(),
+    .references(() => users.id),
   createdBy: uuid("created_by")
-    .references(() => users.id)
-    .notNull(),
+    .references(() => users.id),
   status: clipStatusEnum("status").default("DRAFT").notNull(),
   platform: varchar("platform", { length: 50 }).default("TIKTOK").notNull(),
   videoSizeId: uuid("video_size_id").references(() => videoSizes.id, { onDelete: "set null" }),
@@ -279,8 +277,7 @@ export const revisions = pgTable("revisions", {
   mimeType: varchar("mime_type", { length: 100 }),
   fileSize: bigint("file_size", { mode: "number" }),
   submittedBy: uuid("submitted_by")
-    .references(() => users.id)
-    .notNull(),
+    .references(() => users.id),
   submitNote: text("submit_note"),
   submittedAt: timestamp("submitted_at", { withTimezone: true })
     .defaultNow()
@@ -300,8 +297,7 @@ export const reviews = pgTable("reviews", {
     .references(() => revisions.id, { onDelete: "cascade" })
     .notNull(),
   reviewerId: uuid("reviewer_id")
-    .references(() => users.id)
-    .notNull(),
+    .references(() => users.id),
   status: reviewStatusEnum("status").notNull(),
   comment: text("comment"),
   timecodeSeconds: integer("timecode_seconds"),
@@ -350,8 +346,7 @@ export const publishedPosts = pgTable("published_posts", {
     .defaultNow()
     .notNull(),
   publishedBy: uuid("published_by")
-    .references(() => users.id)
-    .notNull(),
+    .references(() => users.id),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -572,3 +567,4 @@ export const checklistsRelations = relations(checklists, (helpers) => ({
     references: [projects.id],
   }),
 }));
+
