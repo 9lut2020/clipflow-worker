@@ -106,7 +106,7 @@ export const ClipService = {
       }).from(clipsSchema)
         .innerJoin(projects, eq(clipsSchema.projectId, projects.id))
         .innerJoin(episodes, eq(clipsSchema.episodeId, episodes.id))
-        .innerJoin(users, eq(clipsSchema.ownerId, users.id))
+        .leftJoin(users, eq(clipsSchema.ownerId, users.id))
         .leftJoin(videoSizes, eq(clipsSchema.videoSizeId, videoSizes.id))
         .leftJoin(clipPublishSchedules, eq(clipPublishSchedules.clipId, clipsSchema.id))
         .leftJoin(revisions, eq(revisions.id, clipsSchema.currentRevisionId))

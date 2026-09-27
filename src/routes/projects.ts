@@ -11,6 +11,7 @@ import {
 import { adminOnly } from "../middleware/role";
 import { NotificationService } from "../services/notifications/notification.service";
 import { ProjectService } from "../services/project.service";
+import { ClipService } from "../services/clip.service";
 import { logActivity } from "../services/activity-logger";
 import { zValidator } from "@hono/zod-validator";
 import {
@@ -189,6 +190,7 @@ projects.get("/:id/manage", adminOnly, async (c: any) => {
   const db = c.get("db");
   const id = c.req.param("id") as string;
   const service = new ProjectService(db);
+  const user = c.get("user");
 
   const project = await service.getProjectManage(id);
 
@@ -199,10 +201,25 @@ projects.get("/:id/manage", adminOnly, async (c: any) => {
     );
   }
 
+  const [usersResult, membersResult, episodesResult, clipsResult, videoSizesResult] = await Promise.all([
+    db.query.users.findMany({ limit: 5000 }),
+    service.getProjectMembers(id, { limit: 5000, offset: 0, sortBy: "displayName", sortOrder: "asc" }),
+    db.query.episodes.findMany({ where: (ep: any, { eq }: any) => eq(ep.projectId, id), limit: 5000 }),
+    ClipService.listClips({ db, projectId: id, limit: 5000, offset: 0, user }),
+    db.query.videoSizes.findMany({ where: (vs: any, { eq }: any) => eq(vs.isActive, true), limit: 100 })
+  ]);
+
   return c.json({
     status: "success",
     message: "Project managed data retrieved successfully",
-    data: project,
+    data: {
+      project,
+      allUsers: usersResult,
+      members: membersResult.items,
+      episodes: episodesResult,
+      clips: clipsResult.items,
+      videoSizes: videoSizesResult
+    },
   });
 });
 
@@ -320,21 +337,7 @@ projects.post(
     const projectId = c.req.param("id") as string;
     const { clips } = c.req.valid("json");
 
-    const clearsRequiredOwner = clips.some(
-      (clip: any) =>
-        clip.id && !clip.id.toString().startsWith("new-") && clip.ownerId === "",
-    );
-    if (clearsRequiredOwner) {
-      return c.json(
-        {
-          status: "error",
-          code: "VALIDATION_ERROR",
-          message: "A saved clip must have an assignee",
-          data: null,
-        },
-        422,
-      );
-    }
+
 
     try {
       // 1. Pre-fetch all valid Users, Project info, existing Episodes and Clips in parallel
@@ -414,8 +417,9 @@ projects.post(
         }
       }
 
-      // 2. Perform clip inserts and updates concurrently for maximum performance
-      const clipPromises = clips.map(async (clipData: any) => {
+      // 2. Perform clip inserts and updates sequentially to prevent connection exhaustion
+      const results = [];
+      for (const clipData of clips) {
         const episode = episodeMap.get(clipData.episodeNo);
         let assignedOwnerId = "";
         let isNewlyAssigned = false;
@@ -434,7 +438,9 @@ projects.post(
             updatedAt: new Date(),
           };
 
-          if (clipData.ownerId && isValidUser(clipData.ownerId)) {
+          if (clipData.ownerId === "") {
+            updateData.ownerId = null;
+          } else if (clipData.ownerId && isValidUser(clipData.ownerId)) {
             updateData.ownerId = clipData.ownerId;
             if (existingClip && existingClip.ownerId !== clipData.ownerId) {
               assignedOwnerId = clipData.ownerId;
@@ -449,7 +455,7 @@ projects.post(
         } else {
           // Create new
           const hasExplicitOwner = isValidUser(clipData.ownerId);
-          const finalOwnerId = hasExplicitOwner ? clipData.ownerId : validUserId;
+          const finalOwnerId = hasExplicitOwner ? clipData.ownerId : null;
           const finalCreatedBy = isValidUser(clipData.createdBy) ? clipData.createdBy : validUserId;
 
           const [insertedClip] = await db
@@ -468,14 +474,14 @@ projects.post(
             .returning();
 
           clipIdForNotify = insertedClip.id;
-          assignedOwnerId = finalOwnerId;
-          isNewlyAssigned = hasExplicitOwner;
+          if (finalOwnerId) {
+            assignedOwnerId = finalOwnerId;
+            isNewlyAssigned = true;
+          }
         }
 
-        return { isNewlyAssigned, assignedOwnerId, clipIdForNotify, clipName: clipData.name, description: clipData.description };
-      });
-
-      const results = await Promise.all(clipPromises);
+        results.push({ isNewlyAssigned, assignedOwnerId, clipIdForNotify, clipName: clipData.name, description: clipData.description });
+      }
 
       // Group assigned tasks for batch notification
       for (const res of results) {
