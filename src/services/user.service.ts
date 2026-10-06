@@ -89,6 +89,12 @@ export class UserService {
     role: "USER" | "REVIEWER" | "ADMIN",
     actorId: string | null,
   ) {
+    const previous = await this.db.query.users.findFirst({
+      where: (u: any, { eq }: any) => eq(u.id, id),
+      columns: { role: true },
+    });
+    if (!previous) return null;
+
     const [updated] = await this.db
       .update(usersSchema)
       .set({ role, updatedAt: new Date() })
@@ -96,6 +102,7 @@ export class UserService {
       .returning();
 
     if (!updated) return null;
+    if (previous.role === role) return { ...updated, previousRole: previous.role };
 
     await logActivity({
       db: this.db,
@@ -105,11 +112,12 @@ export class UserService {
       entityId: updated.id,
       meta: {
         targetName: updated.displayName,
+        oldRole: previous.role,
         newRole: role,
       },
     });
 
-    return updated;
+    return { ...updated, previousRole: previous.role };
   }
 
   async updateUserStatus(

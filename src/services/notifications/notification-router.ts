@@ -2,6 +2,7 @@ import { LinePersonalService } from "./line/line-personal.service";
 import { LineGroupService } from "./line/line-group.service";
 import { createDb, notifications } from "@clipflow/db";
 import { WebPushService } from "./web-push.service";
+import { notifyReviewerRoleGranted, notifyRoleChanged } from "./line/flex-templates";
 
 export type NotificationEvent =
   | { type: "NEEDS_REVISION"; payload: any }
@@ -9,7 +10,8 @@ export type NotificationEvent =
   | { type: "TASK_ASSIGNED"; payload: any }
   | { type: "MULTI_TASK_ASSIGNED"; payload: any }
   | { type: "LOGIN_SUCCESS"; payload: any }
-  | { type: "PENDING_REVIEW"; payload: any };
+  | { type: "PENDING_REVIEW"; payload: any }
+  | { type: "ROLE_CHANGED"; payload: any };
 
 export const NotificationRouter = {
   async route(event: NotificationEvent, db: ReturnType<typeof createDb>, env: any = {}) {
@@ -82,6 +84,33 @@ export const NotificationRouter = {
         );
         await push(event.payload.assigneeId, "คุณได้รับมอบหมายงานใหม่", `มีงานใหม่ ${event.payload.tasks.length} รายการ`, `/projects/${event.payload.projectId}`);
         break;
+
+      case "ROLE_CHANGED": {
+        const roleLabel: Record<string, string> = { ADMIN: "ผู้ดูแลระบบ", REVIEWER: "ผู้ตรวจงาน", USER: "นักตัดต่อ" };
+        const label = roleLabel[event.payload.newRole] || event.payload.newRole;
+        if (event.payload.userId) {
+          await db.insert(notifications).values({
+            userId: event.payload.userId,
+            type: event.type,
+            title: `บทบาทของคุณเปลี่ยนเป็น ${label}`,
+            message: `บทบาทของคุณถูกเปลี่ยนจาก ${roleLabel[event.payload.oldRole] || event.payload.oldRole || "-"} เป็น ${label}${event.payload.changedBy ? ` โดย ${event.payload.changedBy}` : ""}`,
+            linkUrl: "/dashboard",
+          }).catch(err => console.error("[IN-APP NOTIFY ERROR]", err));
+        }
+        if (event.payload.toLineUserId) {
+          // REVIEWER promotions get the dedicated card with the group invite.
+          const send = event.payload.newRole === "REVIEWER"
+            ? notifyReviewerRoleGranted({
+                toLineUserId: event.payload.toLineUserId,
+                displayName: event.payload.displayName || "ผู้ตรวจงาน",
+                channelAccessToken: event.payload.channelAccessToken,
+              })
+            : notifyRoleChanged(event.payload);
+          await send.catch((err: unknown) => console.error("[NOTIFICATION ROUTER] Role Changed Failed", err));
+        }
+        await push(event.payload.userId, "บทบาทของคุณถูกเปลี่ยน", `บทบาทใหม่: ${label}`, "/dashboard");
+        break;
+      }
 
       case "LOGIN_SUCCESS":
         // Login success usually doesn't need in-app notification since they just logged in

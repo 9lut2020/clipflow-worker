@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { NotificationService } from "../services/notifications/notification.service";
 import { invalidateUserCache } from "../middleware/auth";
 import { eq, ilike, and, sql } from "drizzle-orm";
 import {
@@ -6,7 +7,6 @@ import {
   users as usersSchema,
 } from "@clipflow/db";
 import { adminOnly } from "../middleware/role";
-import { notifyReviewerRoleGranted } from "../services/notifications/line/flex-templates";
 import { UserService } from "../services/user.service";
 import { linkUserRichMenu } from "../services/notifications/line/line.client";
 import { zValidator } from "@hono/zod-validator";
@@ -187,17 +187,26 @@ users.patch("/:id/role", adminOnly, zValidator("json", UserRoleUpdateSchema), as
     return c.json({ status: "error", message: "User not found", data: null }, 404);
   }
 
-  // Trigger LINE Notification: Send Group Invite link to newly appointed Reviewer
-  if (role === "REVIEWER" && updated.lineUserId) {
-    try {
-      await notifyReviewerRoleGranted({
-        toLineUserId: updated.lineUserId,
-        displayName: updated.displayName || "ผู้ตรวจงาน",
-        channelAccessToken: (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN,
-      });
-    } catch (err) {
-      console.error("[LINE NOTIFY REVIEWER ROLE ERROR]", err);
-    }
+  // Tell the user about any actual role change: in-app, LINE and web push.
+  if (updated.previousRole !== role) {
+    const promise = NotificationService.dispatch(
+      {
+        type: "ROLE_CHANGED",
+        payload: {
+          userId: updated.id,
+          toLineUserId: updated.lineUserId || undefined,
+          displayName: updated.displayName || "ผู้ใช้งาน",
+          oldRole: updated.previousRole,
+          newRole: role,
+          changedBy: adminUser?.name,
+          channelAccessToken: (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN,
+        },
+      },
+      db,
+      c.env as any,
+    );
+    if (c.executionCtx?.waitUntil) c.executionCtx.waitUntil(promise);
+    else promise.catch(() => {});
   }
 
   return c.json({

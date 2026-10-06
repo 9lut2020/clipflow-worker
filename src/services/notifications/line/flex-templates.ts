@@ -1897,6 +1897,156 @@ export async function notifyReviewerRoleGranted({
   });
 }
 
+const ROLE_INFO: Record<string, { label: string; emoji: string; color: string; duties: string }> = {
+  ADMIN: {
+    label: "ADMIN (ผู้ดูแลระบบ)",
+    emoji: "👑",
+    color: "#7C3AED",
+    duties: "จัดการโปรเจกต์ มอบหมายงาน จัดการสมาชิก ตรวจงาน และวางแผนการโพสต์ได้ทั้งหมด",
+  },
+  REVIEWER: {
+    label: "REVIEWER (ผู้ตรวจงาน)",
+    emoji: "🔍",
+    color: "#2563EB",
+    duties: "ตรวจคลิปที่ส่งเข้ามา อนุมัติ หรือสั่งแก้ไขพร้อมคอมเมนต์",
+  },
+  USER: {
+    label: "USER (นักตัดต่อ)",
+    emoji: "🎬",
+    color: "#0F766E",
+    duties: "รับงานที่ได้รับมอบหมาย ส่งคลิป และแก้ไขตามคอมเมนต์ของผู้ตรวจ",
+  },
+};
+
+/**
+ * Tell a user their role changed (promotion or demotion), with what the new
+ * role can do. REVIEWER promotions also use notifyReviewerRoleGranted for the
+ * group invite.
+ */
+export async function notifyRoleChanged({
+  toLineUserId,
+  displayName,
+  oldRole,
+  newRole,
+  changedBy,
+  channelAccessToken,
+}: {
+  toLineUserId: string;
+  displayName: string;
+  oldRole?: string | null;
+  newRole: string;
+  changedBy?: string;
+  channelAccessToken?: string;
+}) {
+  const info = ROLE_INFO[newRole] || ROLE_INFO.USER;
+  const oldLabel = oldRole ? ROLE_INFO[oldRole]?.label || oldRole : "-";
+
+  const flexContents = {
+    type: "bubble",
+    size: "mega",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: info.color,
+      paddingAll: "lg",
+      contents: [
+        { type: "text", text: "🔔 ROLE UPDATED", weight: "bold", color: "#E2E8F0", size: "xs" },
+        {
+          type: "text",
+          text: `${info.emoji} บทบาทของคุณถูกเปลี่ยนแล้ว`,
+          weight: "bold",
+          color: "#FFFFFF",
+          size: "lg",
+          margin: "xs",
+          wrap: true,
+        },
+      ],
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "md",
+      contents: [
+        {
+          type: "text",
+          text: `สวัสดีคุณ ${displayName} 👋`,
+          size: "sm",
+          color: "#334155",
+          wrap: true,
+        },
+        {
+          type: "box",
+          layout: "vertical",
+          spacing: "sm",
+          margin: "md",
+          contents: [
+            {
+              type: "box",
+              layout: "baseline",
+              contents: [
+                { type: "text", text: "เดิม", size: "xs", color: "#94A3B8", flex: 2 },
+                { type: "text", text: oldLabel, size: "sm", color: "#64748B", flex: 5, wrap: true },
+              ],
+            },
+            {
+              type: "box",
+              layout: "baseline",
+              contents: [
+                { type: "text", text: "ใหม่", size: "xs", color: "#94A3B8", flex: 2 },
+                { type: "text", text: info.label, size: "sm", color: info.color, weight: "bold", flex: 5, wrap: true },
+              ],
+            },
+            ...(changedBy
+              ? [{
+                  type: "box",
+                  layout: "baseline",
+                  contents: [
+                    { type: "text", text: "โดย", size: "xs", color: "#94A3B8", flex: 2 },
+                    { type: "text", text: changedBy, size: "sm", color: "#64748B", flex: 5, wrap: true },
+                  ],
+                }]
+              : []),
+          ],
+        },
+        { type: "separator", margin: "md" },
+        {
+          type: "text",
+          text: `สิ่งที่คุณทำได้: ${info.duties}`,
+          size: "xs",
+          color: "#64748B",
+          margin: "md",
+          wrap: true,
+        },
+      ],
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      contents: [
+        {
+          type: "button",
+          style: "primary",
+          color: info.color,
+          height: "sm",
+          action: { type: "uri", label: "เปิด ClipFlow 🌐", uri: getLiffUrl("/dashboard") },
+        },
+      ],
+    },
+  };
+
+  const fallbackText = `🔔 [ClipFlow] คุณ ${displayName} บทบาทของคุณถูกเปลี่ยนจาก ${oldLabel} เป็น ${info.label}${changedBy ? ` โดย ${changedBy}` : ""}
+
+${getLiffUrl("/dashboard")}`;
+
+  return sendLinePushFlexMessage({
+    toLineUserId,
+    altText: `🔔 บทบาทของคุณเปลี่ยนเป็น ${info.label} - ClipFlow`,
+    flexContents,
+    fallbackText,
+    channelAccessToken,
+  });
+}
+
 /**
  * Build Flex Card for 'งานที่ต้องตรวจ' Group Command
  */
