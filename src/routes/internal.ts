@@ -1,5 +1,7 @@
 import { Hono } from "hono";
-import { createDb } from "@clipflow/db";
+import { createDb, authHandoffs } from "@clipflow/db";
+import { and, eq, gt, lt, sql } from "drizzle-orm";
+import { z } from "zod";
 import { UserService } from "../services/user.service";
 import { zValidator } from "@hono/zod-validator";
 import { UserSyncSchema } from "@clipflow/validations";
@@ -111,5 +113,70 @@ internalRouter.post(
       },
       isNew ? 201 : 200,
     );
+  },
+);
+
+// ─── PWA login handoff ─────────────────────────────────────────────────────
+// An installed PWA cannot see cookies set in the system browser, where the
+// LINE login completes. The PWA makes a random code; the browser (already
+// signed in) registers it for the user here, and the PWA claims it once.
+
+const HANDOFF_TTL_MINUTES = 10;
+const HandoffCodeSchema = z.string().regex(/^[A-Za-z0-9_-]{32,128}$/);
+
+async function hashHandoffCode(code: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * POST /api/internal/auth-handoffs
+ * Called by the Next.js server after LINE login finished in the browser.
+ */
+internalRouter.post(
+  "/auth-handoffs",
+  zValidator("json", z.object({ code: HandoffCodeSchema, userId: z.string().uuid() })),
+  async (c: any) => {
+    const db = c.get("db");
+    const { code, userId } = c.req.valid("json");
+    const codeHash = await hashHandoffCode(code);
+    await db.insert(authHandoffs).values({ codeHash, userId }).onConflictDoNothing();
+    // Opportunistic cleanup of expired codes.
+    const cleanup = db.delete(authHandoffs)
+      .where(lt(authHandoffs.createdAt, sql`now() - make_interval(mins => ${HANDOFF_TTL_MINUTES})`))
+      .catch(() => {});
+    if (c.executionCtx?.waitUntil) c.executionCtx.waitUntil(cleanup);
+    return c.json({ status: "success", data: null }, 201);
+  },
+);
+
+/**
+ * POST /api/internal/auth-handoffs/claim
+ * Called by the Next.js server for the PWA. Single use: the row is deleted.
+ * Returns 404 while the browser has not finished logging in yet.
+ */
+internalRouter.post(
+  "/auth-handoffs/claim",
+  zValidator("json", z.object({ code: HandoffCodeSchema })),
+  async (c: any) => {
+    const db = c.get("db");
+    const codeHash = await hashHandoffCode(c.req.valid("json").code);
+    const [claimed] = await db.delete(authHandoffs)
+      .where(and(
+        eq(authHandoffs.codeHash, codeHash),
+        gt(authHandoffs.createdAt, sql`now() - make_interval(mins => ${HANDOFF_TTL_MINUTES})`),
+      ))
+      .returning({ userId: authHandoffs.userId });
+    if (!claimed) {
+      return c.json({ status: "error", code: "NOT_READY", message: "Login not completed yet", data: null }, 404);
+    }
+    const user = await db.query.users.findFirst({
+      where: (u: any, { eq: equal }: any) => equal(u.id, claimed.userId),
+      columns: { id: true, role: true, displayName: true, pictureUrl: true, isActive: true },
+    });
+    if (!user || user.isActive === false) {
+      return c.json({ status: "error", code: "INACTIVE", message: "User is inactive", data: null }, 403);
+    }
+    return c.json({ status: "success", data: user });
   },
 );

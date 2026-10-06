@@ -121,6 +121,15 @@ async function main() {
   // Until now display_name was overwritten with the LINE name on every login.
   await db.execute(sql`UPDATE users SET line_display_name = display_name WHERE line_display_name IS NULL AND line_user_id IS NOT NULL;`);
 
+  // One-time login handoff codes for the installed PWA.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS auth_handoffs (
+      code_hash VARCHAR(64) PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+    );
+  `);
+
   console.log("🎉 NEON DB MIGRATION COMPLETE!");
   process.exit(0);
 }

@@ -578,3 +578,11 @@ export const checklistsRelations = relations(checklists, (helpers) => ({
   }),
 }));
 
+// One-time codes that hand a LINE login completed in the system browser over
+// to an installed PWA (separate cookie jar). Only a SHA-256 of the code is
+// stored; rows are single-use and expire after 10 minutes.
+export const authHandoffs = pgTable("auth_handoffs", {
+  codeHash: varchar("code_hash", { length: 64 }).primaryKey(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
