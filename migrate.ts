@@ -113,6 +113,14 @@ async function main() {
     );
   `);
 
+  // User contact details and LINE name kept separately from the display name.
+  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS line_display_name VARCHAR(255);`);
+  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30);`);
+  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255);`);
+  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_completed_at TIMESTAMP WITH TIME ZONE;`);
+  // Until now display_name was overwritten with the LINE name on every login.
+  await db.execute(sql`UPDATE users SET line_display_name = display_name WHERE line_display_name IS NULL AND line_user_id IS NOT NULL;`);
+
   console.log("🎉 NEON DB MIGRATION COMPLETE!");
   process.exit(0);
 }
