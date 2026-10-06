@@ -21,6 +21,7 @@ import { internalRouter } from "./routes/internal";
 import { assetsRouter } from "./routes/assets";
 import { checklistsRouter } from "./routes/checklists";
 import { aggregateDailyMetrics } from "./cron/analytics-aggregator";
+import { normalizePath, reportSystemError } from "./services/system-alerts";
 
 export type Env = {
   DATABASE_URL: string;
@@ -38,12 +39,17 @@ export type Env = {
   ENVIRONMENT?: string;
   CORS_ORIGINS?: string;
   FRONTEND_URL?: string;
+  LINE_ADMIN_GROUP_ID?: string;
+  /** LINE group for system error alerts; falls back to LINE_ADMIN_GROUP_ID. */
+  LINE_ALERT_GROUP_ID?: string;
   DB_DRIVER?: "neon-http" | "hyperdrive";
   NEON_FETCH_ENDPOINT?: string;
 };
 
 type Variables = {
   db: ReturnType<typeof createDb>;
+  /** Set by error handlers so the 5xx alert can say what went wrong. */
+  errorMessage?: string;
 };
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -79,6 +85,29 @@ app.use("*", async (c: any, next: any) => {
   const requestId = c.req.header("x-request-id") || crypto.randomUUID();
   c.header("x-request-id", requestId);
   await next();
+});
+
+// Alert the LINE ops group on any 5xx (throttled per route). Runs after the
+// response is built, so it never delays or changes what the client receives.
+app.use("*", async (c: any, next: any) => {
+  await next();
+  if (c.res.status < 500) return;
+  let db = c.get("db");
+  try {
+    if (!db && c.env?.DATABASE_URL) db = createDb(c.env.DATABASE_URL);
+  } catch {
+    db = undefined;
+  }
+  const alert = reportSystemError({
+    db,
+    env: c.env,
+    source: `${c.req.method} ${normalizePath(c.req.path)}`,
+    status: c.res.status,
+    message: c.get("errorMessage"),
+    requestId: c.res.headers.get("x-request-id") || undefined,
+  });
+  if (c.executionCtx?.waitUntil) c.executionCtx.waitUntil(alert);
+  else alert.catch(() => {});
 });
 
 // Surface backend time in the browser Network panel without logging every
@@ -325,6 +354,9 @@ app.post("/webhook/line", async (c: any) => {
     return c.text("OK", 200);
   } catch (err: any) {
     console.error("[LINE WEBHOOK ERROR]", err);
+    // The webhook must answer 200 to LINE, so report the failure explicitly.
+    const alert = reportSystemError({ db: c.get("db"), env: c.env, source: "POST /webhook/line", message: err?.message });
+    if (c.executionCtx?.waitUntil) c.executionCtx.waitUntil(alert);
     return c.text("OK", 200);
   }
 });
@@ -364,6 +396,7 @@ app.notFound((c: any) =>
 // ─── Error Handler ─────────────────────────────────────────────────────────
 app.onError((err: any, c: any) => {
   console.error("[ERROR]", err);
+  c.set("errorMessage", err?.message);
   // Do not leak driver/SQL messages to clients.
   return c.json(
     { status: "error", code: "INTERNAL_ERROR", message: "Internal server error", data: null },
@@ -375,9 +408,14 @@ export default {
   fetch: app.fetch,
 
   async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
-    // 17:00 UTC = 00:00 Asia/Bangkok
-    if (event.cron === "0 17 * * *") {
-      await aggregateDailyMetrics(env);
+    try {
+      // 17:00 UTC = 00:00 Asia/Bangkok
+      if (event.cron === "0 17 * * *") {
+        await aggregateDailyMetrics(env);
+      }
+    } catch (err: any) {
+      console.error("[CRON ERROR]", err);
+      await reportSystemError({ db: createDb(env.DATABASE_URL), env, source: `cron ${event.cron}`, message: err?.message });
     }
   },
 

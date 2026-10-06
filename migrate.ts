@@ -130,6 +130,16 @@ async function main() {
     );
   `);
 
+  // Throttle state for LINE system-error alerts.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS system_alerts (
+      alert_key VARCHAR(200) PRIMARY KEY,
+      last_sent_at TIMESTAMP WITH TIME ZONE NOT NULL,
+      suppressed INTEGER DEFAULT 0 NOT NULL,
+      reported INTEGER DEFAULT 0 NOT NULL
+    );
+  `);
+
   console.log("🎉 NEON DB MIGRATION COMPLETE!");
   process.exit(0);
 }

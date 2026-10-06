@@ -90,5 +90,7 @@ export function apiError(c: Context, status: 400 | 401 | 403 | 404 | 409 | 422 |
 export function handleApiError(c: Context, error: unknown) {
   if (error instanceof ApiQueryError) return apiError(c, 400, "VALIDATION_ERROR", error.message, error.fields);
   console.error("[API_ERROR]", error);
+  // Picked up by the 5xx alert middleware.
+  c.set("errorMessage" as never, (error instanceof Error ? error.message : String(error)) as never);
   return apiError(c, 500, "INTERNAL_ERROR", "Internal server error");
 }

@@ -43,5 +43,7 @@ export async function aggregateDailyMetrics(env: Env) {
     console.log("[CRON] Daily metrics aggregation completed");
   } catch (error) {
     console.error("[CRON] Failed to aggregate metrics:", error);
+    // Let scheduled() report it to the LINE ops group.
+    throw error;
   }
 }
