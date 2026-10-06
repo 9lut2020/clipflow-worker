@@ -3,9 +3,15 @@ import {
   clips as clipsSchema,
   revisions as revisionsSchema,
   reviews as reviewsSchema,
+  runBatch,
 } from "@clipflow/db";
 import { logActivity } from "./activity-logger";
 import { NotificationService } from "./notifications/notification.service";
+
+const REVIEWABLE_STATUSES = ["PENDING_REVIEW", "IN_REVIEW", "RESUBMITTED"];
+
+const isUniqueViolation = (error: any) =>
+  error?.code === "23505" || /duplicate key value/i.test(String(error?.message || ""));
 
 export const RevisionService = {
   async getRevisionsForClip({ db, clipId, submittedBy, from, to, limit = 20, offset = 0, sortBy = "submittedAt", sortOrder = "desc" }: { db: any; clipId: string; submittedBy?: string; from?: string; to?: string; limit?: number; offset?: number; sortBy?: "revisionNo" | "submittedAt"; sortOrder?: "asc" | "desc" }) {
@@ -54,101 +60,90 @@ export const RevisionService = {
     executionCtx?: any;
     pushEnv?: Record<string, unknown>;
   }) {
-    // We can do pre-reads outside the transaction to reduce lock time
-    const existingRevisions = await db.query.revisions
-      .findMany({
-        where: (rev: any, { eq }: any) => eq(rev.clipId, clipId),
-      })
-      .catch(() => []);
-
-    const nextRevisionNo = existingRevisions.length + 1;
-
     const extractedFileId =
       driveUrl?.match(/\/d\/([a-zA-Z0-9_-]+)/)?.[1] ||
       driveUrl?.match(/id=([a-zA-Z0-9_-]+)/)?.[1] ||
       `file_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-    let notificationPayload: any = null;
-    let newRevResult: any = null;
+    // One atomic round trip: the revision number is computed by the database
+    // (not from a prior read), the clip points at the new revision, and the
+    // clip context needed for notifications is read back in the same batch.
+    // uq_revisions_clip_revision_no rejects a concurrent duplicate; retry once.
+    const run = () =>
+      runBatch(db, (q) => [
+        q
+          .insert(revisionsSchema)
+          .values({
+            clipId,
+            revisionNo: sql`(SELECT coalesce(max(${revisionsSchema.revisionNo}), 0) + 1 FROM ${revisionsSchema} WHERE ${revisionsSchema.clipId} = ${clipId})`,
+            driveFileId: extractedFileId,
+            driveUrl: driveUrl || "",
+            submitNote: submitNote || "",
+            submittedBy: userId,
+          })
+          .returning(),
+        q
+          .update(clipsSchema)
+          .set({
+            status: "PENDING_REVIEW",
+            currentRevisionId: sql`(SELECT ${revisionsSchema.id} FROM ${revisionsSchema} WHERE ${revisionsSchema.clipId} = ${clipId} ORDER BY ${revisionsSchema.revisionNo} DESC LIMIT 1)`,
+            updatedAt: new Date(),
+          })
+          .where(eq(clipsSchema.id, clipId)),
+        q.query.clips.findFirst({
+          where: (c: any, { eq }: any) => eq(c.id, clipId),
+          columns: { id: true, name: true },
+          with: {
+            owner: { columns: { lineUserId: true, displayName: true } },
+            project: { columns: { name: true } },
+          },
+        }),
+      ]);
 
-    // Sequential mutations (neon-http does not support transactions;
-    // single-tenant Worker requests have no concurrent conflicting writes
-    // on the same clip, so sequential ordering gives the same guarantee).
-    const [newRev] = await db
-      .insert(revisionsSchema)
-      .values({
-        clipId,
-        revisionNo: nextRevisionNo,
-        driveFileId: extractedFileId,
-        driveUrl: driveUrl || "",
-        submitNote: submitNote || "",
-        submittedBy: userId,
-      })
-      .returning();
-
-    newRevResult = newRev;
-
-    // Update clip status & currentRevisionId
-    await db
-      .update(clipsSchema)
-      .set({
-        status: "PENDING_REVIEW",
-        currentRevisionId: newRev.id,
-        ...(driveUrl && { driveUrl }),
-        updatedAt: new Date(),
-      })
-      .where(eq(clipsSchema.id, clipId));
-
-    // Need clip info for notification & audit
-    const fullClip = await db.query.clips.findFirst({
-      where: (c: any, { eq }: any) => eq(c.id, clipId),
-      with: { owner: true, project: true },
-    });
-
-    // Audit Log
-    await logActivity({
-      db,
-      actorId: userId,
-      action: nextRevisionNo === 1 ? "CLIP_SUBMITTED" : "CLIP_RESUBMITTED",
-      entityType: "clip",
-      entityId: clipId,
-      meta: {
-        clipName: fullClip?.name,
-        revisionNo: nextRevisionNo,
-        projectName: fullClip?.project?.name,
-      },
-    });
-
-    // Prepare notification payload if clip found
-    if (fullClip) {
-      notificationPayload = {
-        toLineUserId: fullClip.owner?.lineUserId,
-        clipName: fullClip.name,
-        projectName: fullClip.project?.name,
-        editorName: fullClip.owner?.displayName || "Editor",
-        driveUrl,
-        submitNote,
-        clipId,
-        channelAccessToken,
-        adminGroupId,
-      };
+    let batchResult: any[];
+    try {
+      batchResult = await run();
+    } catch (error: any) {
+      if (!isUniqueViolation(error)) throw error;
+      batchResult = await run();
     }
+    const [[newRev], , fullClip] = batchResult as [any[], unknown, any];
 
-    // Post-Commit Asynchronous Notification Dispatch
-    if (notificationPayload) {
-      const promise = NotificationService.dispatch({
-        type: "PENDING_REVIEW",
-        payload: notificationPayload,
-      }, db, pushEnv);
-      if (executionCtx?.waitUntil) {
-        executionCtx.waitUntil(promise);
-      } else {
-        // Fallback if executionCtx is not provided (e.g. testing)
-        promise.catch(() => {});
-      }
-    }
+    // Audit log and notifications do not affect the response: run them after it.
+    const background = Promise.all([
+      logActivity({
+        db,
+        actorId: userId,
+        action: newRev.revisionNo === 1 ? "CLIP_SUBMITTED" : "CLIP_RESUBMITTED",
+        entityType: "clip",
+        entityId: clipId,
+        meta: {
+          clipName: fullClip?.name,
+          revisionNo: newRev.revisionNo,
+          projectName: fullClip?.project?.name,
+        },
+      }).catch((err) => console.error("[ACTIVITY LOG ERROR]", err)),
+      fullClip
+        ? NotificationService.dispatch({
+            type: "PENDING_REVIEW",
+            payload: {
+              toLineUserId: fullClip.owner?.lineUserId,
+              clipName: fullClip.name,
+              projectName: fullClip.project?.name,
+              editorName: fullClip.owner?.displayName || "Editor",
+              driveUrl,
+              submitNote,
+              clipId,
+              channelAccessToken,
+              adminGroupId,
+            },
+          }, db, pushEnv)
+        : Promise.resolve(),
+    ]);
+    if (executionCtx?.waitUntil) executionCtx.waitUntil(background);
+    else background.catch(() => {});
 
-    return newRevResult;
+    return newRev;
   },
 
   async getRevision({ db, id }: { db: any; id: string }) {
@@ -221,85 +216,57 @@ export const RevisionService = {
     executionCtx?: any;
     pushEnv?: Record<string, unknown>;
   }) {
-    let revisionId = targetId;
-    let clipId = "";
-    
-    // 1. Try finding by revision ID outside transaction
-    let revision = await db.query.revisions.findFirst({
-      where: (rev: any, { eq }: any) => eq(rev.id, targetId),
-      columns: { id: true, clipId: true, revisionNo: true },
-    });
-
-    let clip = null;
-
-    if (revision) {
-      clipId = revision.clipId;
-    } else {
-      // 2. Check if targetId is a clip ID
-      clip = await db.query.clips.findFirst({
+    // targetId may be a revision id or (legacy callers) a clip id: resolve both
+    // in parallel instead of one after the other.
+    const [revision, clipById] = await Promise.all([
+      db.query.revisions.findFirst({
+        where: (rev: any, { eq }: any) => eq(rev.id, targetId),
+        columns: { id: true, clipId: true },
+        with: { clip: { columns: { id: true, status: true, ownerId: true, currentRevisionId: true } } },
+      }).catch(() => null),
+      db.query.clips.findFirst({
         where: (clipRow: any, { eq }: any) => eq(clipRow.id, targetId),
-        columns: { id: true, driveUrl: true, ownerId: true },
-      });
+        columns: { id: true, status: true, ownerId: true, currentRevisionId: true },
+      }).catch(() => null),
+    ]);
 
-      if (!clip) {
-        throw new Error("Revision or Clip not found");
-      }
-      clipId = clip.id;
-    }
-
-    const currentClip = await db.query.clips.findFirst({
-      where: (clipRow: any, { eq }: any) => eq(clipRow.id, clipId),
-      columns: { id: true, status: true },
-    });
-
-    if (!currentClip || (currentClip.status !== "PENDING_REVIEW" && currentClip.status !== "IN_REVIEW")) {
+    const currentClip = revision?.clip || clipById;
+    if (!currentClip) throw new Error("Revision or Clip not found");
+    if (!REVIEWABLE_STATUSES.includes(currentClip.status)) {
       throw new Error("Clip is not ready for review");
     }
+    const clipId: string = currentClip.id;
+    let revisionId: string | null = revision?.id || currentClip.currentRevisionId || null;
 
-    let notificationPayload: any = null;
-    let newReviewResult: any = null;
-
-    // Sequential mutations (neon-http does not support transactions;
-    // single-tenant Worker requests have no concurrent conflicting writes
-    // on the same clip, so sequential ordering gives the same guarantee).
-    if (!revision) {
-      const existingRevs = await db.query.revisions.findMany({
+    if (!revisionId) {
+      const latest = await db.query.revisions.findFirst({
         where: (rev: any, { eq }: any) => eq(rev.clipId, clipId),
         orderBy: (rev: any, { desc }: any) => [desc(rev.revisionNo)],
+        columns: { id: true },
       });
-
-      if (existingRevs.length > 0) {
-        revisionId = existingRevs[0].id;
-      } else if (clip) {
-        const extractedFileId =
-          clip.driveUrl?.match(/\/d\/([a-zA-Z0-9_-]+)/)?.[1] ||
-          clip.driveUrl?.match(/id=([a-zA-Z0-9_-]+)/)?.[1] ||
-          `file_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-
-        const [newRev] = await db
-          .insert(revisionsSchema)
-          .values({
-            clipId: clip.id,
-            revisionNo: 1,
-            driveFileId: extractedFileId,
-            driveUrl: clip.driveUrl || "",
-            submitNote: "Initial submission",
-            submittedBy: clip.ownerId,
-          })
-          .returning();
-
-        revisionId = newRev.id;
-
-        await db
-          .update(clipsSchema)
-          .set({ currentRevisionId: newRev.id })
-          .where(eq(clipsSchema.id, clip.id));
-      }
+      revisionId = latest?.id || null;
+    }
+    if (!revisionId) {
+      // Legacy clip reviewed without any submission: create revision 1.
+      const [[newRev]] = await runBatch(db, (q) => [
+        q.insert(revisionsSchema).values({
+          clipId,
+          revisionNo: 1,
+          driveFileId: `file_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          driveUrl: "",
+          submitNote: "Initial submission",
+          submittedBy: currentClip.ownerId,
+        }).returning(),
+        q.update(clipsSchema)
+          .set({ currentRevisionId: sql`(SELECT ${revisionsSchema.id} FROM ${revisionsSchema} WHERE ${revisionsSchema.clipId} = ${clipId} ORDER BY ${revisionsSchema.revisionNo} DESC LIMIT 1)` })
+          .where(eq(clipsSchema.id, clipId)),
+      ]);
+      revisionId = newRev.id;
     }
 
-    const [newReview] = await db
-      .insert(reviewsSchema)
-      .values({
+    // Review insert, status change and notification context: one round trip.
+    const [[newReview], , fullClip, reviewerUser] = await runBatch(db, (q) => [
+      q.insert(reviewsSchema).values({
         clipId,
         revisionId,
         reviewerId,
@@ -307,70 +274,62 @@ export const RevisionService = {
         comment,
         ...(timecodeSeconds !== undefined && { timecodeSeconds }),
         ...(timecodeStr && { timecodeStr }),
-      })
-      .returning();
-
-    newReviewResult = newReview;
-
-    // Update clip status to match review outcome
-    await db
-      .update(clipsSchema)
-      .set({ status, updatedAt: new Date() })
-      .where(eq(clipsSchema.id, clipId));
-
-    const fullClip = await db.query.clips.findFirst({
-      where: (c: any, { eq }: any) => eq(c.id, clipId),
-      with: { owner: true, project: true },
-    });
-
-    const reviewerUser = await db.query.users.findFirst({
-      where: (u: any, { eq }: any) => eq(u.id, reviewerId),
-      columns: { displayName: true },
-    });
+      }).returning(),
+      q.update(clipsSchema)
+        .set({ status, updatedAt: new Date() })
+        .where(eq(clipsSchema.id, clipId)),
+      q.query.clips.findFirst({
+        where: (c: any, { eq }: any) => eq(c.id, clipId),
+        columns: { id: true, name: true, ownerId: true, projectId: true },
+        with: {
+          owner: { columns: { lineUserId: true } },
+          project: { columns: { name: true } },
+        },
+      }),
+      q.query.users.findFirst({
+        where: (u: any, { eq }: any) => eq(u.id, reviewerId),
+        columns: { displayName: true },
+      }),
+    ]) as [any[], unknown, any, any];
 
     const reviewerName = reviewerUser?.displayName || fallbackReviewerName;
 
-    // Audit Log
-    await logActivity({
-      db,
-      actorId: reviewerId || null,
-      action: status === "APPROVED" ? "CLIP_APPROVED" : "CLIP_REJECTED",
-      entityType: "clip",
-      entityId: clipId,
-      meta: {
-        clipName: fullClip?.name,
-        projectName: fullClip?.project?.name,
-        comment,
-        reviewerName,
-      },
-    });
+    const background = Promise.all([
+      logActivity({
+        db,
+        actorId: reviewerId || null,
+        action: status === "APPROVED" ? "CLIP_APPROVED" : "CLIP_REJECTED",
+        entityType: "clip",
+        entityId: clipId,
+        meta: {
+          clipName: fullClip?.name,
+          projectName: fullClip?.project?.name,
+          comment,
+          reviewerName,
+        },
+      }).catch((err) => console.error("[ACTIVITY LOG ERROR]", err)),
+      fullClip
+        ? NotificationService.dispatch({
+            type: status,
+            payload: {
+              // ownerId/projectId are required for the in-app notification.
+              ownerId: fullClip.ownerId,
+              projectId: fullClip.projectId,
+              toLineUserId: fullClip.owner?.lineUserId,
+              clipName: fullClip.name || "คลิปวิดีโอ",
+              projectName: fullClip.project?.name,
+              reviewerName,
+              comment,
+              clipId,
+              channelAccessToken,
+            },
+          }, db, pushEnv)
+        : Promise.resolve(),
+    ]);
+    if (executionCtx?.waitUntil) executionCtx.waitUntil(background);
+    else background.catch(() => {});
 
-    if (fullClip) {
-      notificationPayload = {
-        toLineUserId: fullClip.owner?.lineUserId,
-        clipName: fullClip?.name || "คลิปวิดีโอ",
-        projectName: fullClip?.project?.name,
-        reviewerName,
-        comment,
-        clipId,
-        channelAccessToken,
-      };
-    }
-
-    // Post-mutation Asynchronous Notification Dispatch
-    if (notificationPayload) {
-      const promise = NotificationService.dispatch({
-        type: status,
-        payload: notificationPayload,
-      }, db, pushEnv);
-      if (executionCtx?.waitUntil) {
-        executionCtx.waitUntil(promise);
-      } else {
-        promise.catch(() => {});
-      }
-    }
-
-    return newReviewResult;
+    return newReview;
   },
 
   async updateReview({

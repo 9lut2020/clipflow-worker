@@ -1,7 +1,6 @@
 import { Hono, type Context } from "hono";
 import { createDb, rawEvents, dailyMetrics } from "@clipflow/db";
 import { asc, desc, eq, and, gte, lte, count } from "drizzle-orm";
-import { authMiddleware } from "../middleware/auth";
 import { adminOnly } from "../middleware/role";
 import { handleApiError, paginated, parseDate, parseListQuery } from "../lib/api-contract";
 
@@ -13,30 +12,27 @@ export const analyticsRouter = new Hono<{
   };
 }>();
 
-analyticsRouter.post("/track", authMiddleware, async (c: Context) => {
+// authMiddleware already runs for every /api route; tracking is fire-and-forget
+// so the client never waits on the insert.
+analyticsRouter.post("/track", async (c: Context) => {
   const db = c.get("db");
   const user = c.get("user");
-  
-  try {
-    const body = await c.req.json();
-    const { eventName, properties, context } = body;
-    
-    if (!eventName) {
-      return c.json({ status: "error", message: "event_name is required" }, 400);
-    }
-    
-    await db.insert(rawEvents).values({
-      eventName,
-      userId: user.id,
-      properties: properties || {},
-      context: context || {}
-    });
-    
-    return c.json({ status: "success" });
-  } catch (error: any) {
-    console.error("Analytics track error:", error);
-    return c.json({ status: "error", message: "Failed to track event" }, 500);
+  const body = await c.req.json().catch(() => null);
+  const eventName = body?.eventName;
+  if (!eventName || typeof eventName !== "string") {
+    return c.json({ status: "error", message: "eventName is required" }, 400);
   }
+
+  const insert = db.insert(rawEvents).values({
+    eventName: eventName.slice(0, 100),
+    userId: user.id,
+    properties: body.properties || {},
+    context: body.context || {},
+  }).catch((error: unknown) => console.error("Analytics track error:", error));
+  if (c.executionCtx?.waitUntil) c.executionCtx.waitUntil(insert);
+  else await insert;
+
+  return c.json({ status: "success" }, 202);
 });
 
 analyticsRouter.get("/metrics", adminOnly, async (c: Context) => {

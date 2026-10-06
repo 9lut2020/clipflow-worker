@@ -15,3 +15,12 @@ LINE_CHANNEL_SECRET=
 LINE_LIFF_ID=
 GOOGLE_SERVICE_ACCOUNT_KEY=
 JWT_SECRET=your-secret-key-here
+
+# Shared secret between the Next.js server and this Worker. When set, every
+# /api request must carry the same value in x-internal-secret (set the same
+# INTERNAL_API_SECRET on Vercel). Production: wrangler secret put INTERNAL_API_SECRET
+INTERNAL_API_SECRET=
+# Enables bypass/mock role overrides for local development only
+ENVIRONMENT=development
+# Public frontend URL used in notification links
+FRONTEND_URL=http://localhost:3000

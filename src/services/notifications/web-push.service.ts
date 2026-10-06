@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { buildPushPayload, type PushSubscription, type VapidKeys } from "@block65/webcrypto-web-push";
-import { pushSubscriptions } from "@clipflow/db";
+import { pushSubscriptions, users } from "@clipflow/db";
 
 type PushEnv = {
   VAPID_PUBLIC_KEY?: string;
@@ -60,13 +60,15 @@ export const WebPushService = {
   },
 
   async sendToRoles({ db, roles, message, env }: { db: any; roles: string[]; message: PushMessage; env: PushEnv }) {
-    const recipients = await db.query.users.findMany({
-      where: (user: any, operators: any) => and(
-        inArray(user.role, roles),
-        eq(user.isActive, true),
-      ),
-      columns: { id: true },
-    }).catch(() => []);
+    if (!getVapid(env)) return;
+    // Users without a subscription are filtered by the join, so only
+    // recipients who can actually receive a push are loaded.
+    const recipients = await db
+      .selectDistinct({ id: users.id })
+      .from(users)
+      .innerJoin(pushSubscriptions, eq(pushSubscriptions.userId, users.id))
+      .where(and(inArray(users.role, roles as any), eq(users.isActive, true)))
+      .catch(() => []);
     await this.sendToUsers({ db, userIds: recipients.map((user: any) => user.id), message, env });
   },
 };

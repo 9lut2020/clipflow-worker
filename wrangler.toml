@@ -12,11 +12,16 @@ mode = "smart"
 
 [vars]
 ENVIRONMENT = "production"
+DB_DRIVER = "neon-http"
+# Public frontend URL used in LINE/in-app notification links
+FRONTEND_URL = "https://clipflow-tmyda.vercel.app"
 
 # ---- Database acceleration ----
-# Reuse the existing Cloudflare Hyperdrive config for Neon. The Worker keeps
-# DATABASE_URL as a local-development fallback; production traffic uses this
-# pooled connection string to avoid repeated origin connection setup.
+# Opt-in: set DB_DRIVER = "hyperdrive" under [vars] to route API traffic through
+# this pooled Hyperdrive connection instead of Neon's HTTP endpoint.
+# Before enabling, DISABLE Hyperdrive query caching, otherwise reads can be up
+# to 60s stale and saved changes appear to revert:
+#   npx wrangler hyperdrive update 759487ab447d492ba8ee3262cb52d2e9 --caching-disabled true
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "759487ab447d492ba8ee3262cb52d2e9"
@@ -33,10 +38,9 @@ max_batch_timeout = 5
 
 # ---- Cron Triggers ----
 [triggers]
-crons = [
-  "*/5 * * * *",
-  "*/10 * * * *"
-]
+# Only crons with a handler in src/index.ts scheduled(). The previous */5 and
+# */10 entries woke the Worker every few minutes and did nothing.
+crons = ["0 17 * * *"]
 
 # ---- Secrets (set via: wrangler secret put SECRET_NAME) ----
 # DATABASE_URL

@@ -2,6 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { neon } from "@neondatabase/serverless";
 
+// Idempotent migrations (IF NOT EXISTS only), safe to re-run at any time.
+const MIGRATIONS = [
+  "packages/db/migrations/0012_safe_performance_indexes.sql",
+  "packages/db/migrations/0013_revision_no_unique.sql",
+];
+
 function databaseUrl() {
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
   const varsPath = path.resolve(".dev.vars");
@@ -9,16 +15,40 @@ function databaseUrl() {
   return fs.readFileSync(varsPath, "utf8").match(/^DATABASE_URL=(.+)$/m)?.[1]?.trim() || "";
 }
 
-async function main() {
-  const migrationPath = path.resolve("packages/db/migrations/0012_safe_performance_indexes.sql");
-  if (!fs.existsSync(migrationPath)) {
-    console.warn("Performance-index migration is not present in this revision; skipping index application.");
-    return;
+// Splits on ";" at statement boundaries, keeping DO $$ ... $$ blocks intact.
+function splitStatements(source: string) {
+  const withoutComments = source.replace(/--[^\n]*/g, "");
+  const statements: string[] = [];
+  let current = "";
+  let inDollarBlock = false;
+  for (let i = 0; i < withoutComments.length; i += 1) {
+    if (withoutComments.startsWith("$$", i)) {
+      inDollarBlock = !inDollarBlock;
+      current += "$$";
+      i += 1;
+      continue;
+    }
+    const char = withoutComments[i];
+    if (char === ";" && !inDollarBlock) {
+      if (current.trim()) statements.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
   }
-  const statements = fs.readFileSync(migrationPath, "utf8")
-    .split(";")
-    .map((statement) => statement.replace(/--[^\n]*/g, "").trim())
-    .filter(Boolean);
+  if (current.trim()) statements.push(current.trim());
+  return statements;
+}
+
+async function main() {
+  const statements = MIGRATIONS.flatMap((file) => {
+    const migrationPath = path.resolve(file);
+    if (!fs.existsSync(migrationPath)) {
+      console.warn(`Missing ${file}; skipping.`);
+      return [];
+    }
+    return splitStatements(fs.readFileSync(migrationPath, "utf8"));
+  });
 
   if (process.argv.includes("--dry-run")) {
     console.log(`Validated ${statements.length} idempotent index statements.`);

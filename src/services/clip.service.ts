@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, notInArray, or, sql } from "drizzle-orm";
-import { clipPublishSchedules, clips as clipsSchema, episodes, projects, publishedPosts, revisions, users, videoSizes } from "@clipflow/db";
+import { clipPublishSchedules, clips as clipsSchema, episodes, projects, revisions, users, videoSizes } from "@clipflow/db";
 
 export const ClipService = {
   async listClips({
@@ -84,12 +84,10 @@ export const ClipService = {
     // List endpoints must never hydrate each row with another query.  The old
     // implementation did 2 + N database round trips and was the primary cause
     // of /tasks and /admin/publish timeouts.
-    const postCounts = db.$with("post_counts").as(
-      db.select({ clipId: publishedPosts.clipId, count: sql<number>`count(*)::int`.as("count") })
-        .from(publishedPosts).groupBy(publishedPosts.clipId),
-    );
+    // Count posts per returned row through idx_published_posts_clip_id rather
+    // than aggregating the whole published_posts table on every list request.
     const [rows, countRows] = await Promise.all([
-      db.with(postCounts).select({
+      db.select({
         id: clipsSchema.id, name: clipsSchema.name, description: clipsSchema.description,
         status: clipsSchema.status, platform: clipsSchema.platform, videoSizeId: clipsSchema.videoSizeId,
         deadline: clipsSchema.deadline, scheduledPublishAt: clipsSchema.scheduledPublishAt,
@@ -102,7 +100,7 @@ export const ClipService = {
         scheduleDate: clipPublishSchedules.publishDate, scheduleTime: clipPublishSchedules.publishTime,
         scheduleStatus: clipPublishSchedules.status, scheduleRepeat: clipPublishSchedules.isRepeat, scheduleNote: clipPublishSchedules.note,
         revisionDriveUrl: revisions.driveUrl, revisionNo: revisions.revisionNo,
-        publishedPostCount: sql<number>`coalesce(${postCounts.count}, 0)`,
+        publishedPostCount: sql<number>`(SELECT count(*)::int FROM published_posts pp WHERE pp.clip_id = ${clipsSchema.id})`,
       }).from(clipsSchema)
         .innerJoin(projects, eq(clipsSchema.projectId, projects.id))
         .innerJoin(episodes, eq(clipsSchema.episodeId, episodes.id))
@@ -110,7 +108,6 @@ export const ClipService = {
         .leftJoin(videoSizes, eq(clipsSchema.videoSizeId, videoSizes.id))
         .leftJoin(clipPublishSchedules, eq(clipPublishSchedules.clipId, clipsSchema.id))
         .leftJoin(revisions, eq(revisions.id, clipsSchema.currentRevisionId))
-        .leftJoin(postCounts, eq(postCounts.clipId, clipsSchema.id))
         .where(whereClause)
         .orderBy(order(sortColumns[sortBy]), order(clipsSchema.id))
         .limit(limit ?? 20).offset(offset ?? 0),

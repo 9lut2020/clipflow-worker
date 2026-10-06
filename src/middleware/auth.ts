@@ -7,12 +7,22 @@ export type AuthUser = {
 };
 
 interface CachedUser {
-  user: any;
+  user: Promise<any>;
   expiresAt: number;
 }
 const userCache = new Map<string, CachedUser>();
 const CACHE_TTL = 30 * 1000; // 30 seconds
 
+/** Drop a cached user after a role/status change so this isolate sees it immediately. */
+export const invalidateUserCache = (userId: string) => userCache.delete(userId);
+
+
+function timingSafeEqual(a: string, b: string) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -32,6 +42,17 @@ export const authMiddleware = async (c: Context, next: Next) => {
     return next();
   }
 
+  // x-user-id is only trustworthy when the request came from our Next.js
+  // server. When a shared secret is configured, every API call must carry it;
+  // otherwise anyone who knows the public Worker URL could impersonate a user.
+  const secret = (c.env as any)?.INTERNAL_API_SECRET || (c.env as any)?.INTERNAL_SECRET;
+  if (secret && !timingSafeEqual(c.req.header("x-internal-secret") || "", secret)) {
+    return c.json(
+      { status: "error", message: "Unauthorized: Invalid request origin", data: null },
+      401,
+    );
+  }
+
   const userId = c.req.header("x-user-id");
 
   if (userId) {
@@ -49,16 +70,16 @@ export const authMiddleware = async (c: Context, next: Next) => {
       );
     }
 
-    // Check cache first
+    // Check cache first. In-flight lookups are shared, so parallel requests
+    // from one page load hit the database once instead of once each.
     const now = Date.now();
     const cached = userCache.get(userId);
     let user;
 
     if (cached && cached.expiresAt > now) {
-      user = cached.user;
+      user = await cached.user;
     } else {
-      // Safely query user without throwing UUID syntax errors
-      user = await db.query.users
+      const lookup = db.query.users
         .findFirst({
           where: (u: any, { eq }: any) => eq(u.id, userId),
           columns: {
@@ -69,13 +90,13 @@ export const authMiddleware = async (c: Context, next: Next) => {
             lineUserId: true,
           },
         })
+        // Invalid UUIDs throw; treat them as unknown users.
         .catch(() => null);
-        
-      if (user) {
-        // Cleanup cache occasionally to prevent memory leaks in the isolate
-        if (userCache.size > 1000) userCache.clear();
-        userCache.set(userId, { user, expiresAt: now + CACHE_TTL });
-      }
+      // Cleanup cache occasionally to prevent memory leaks in the isolate
+      if (userCache.size > 1000) userCache.clear();
+      userCache.set(userId, { user: lookup, expiresAt: now + CACHE_TTL });
+      user = await lookup;
+      if (!user) userCache.delete(userId);
     }
     c.header(
       "Server-Timing",
@@ -96,7 +117,7 @@ export const authMiddleware = async (c: Context, next: Next) => {
     let userRole = user.role as "USER" | "REVIEWER" | "ADMIN";
 
     // Allow frontend to override role for bypass/mock users ONLY in development
-    const isDevelopment = process.env.NODE_ENV === "development";
+    const isDevelopment = (c.env as any)?.ENVIRONMENT === "development";
     if (
       isDevelopment &&
       user.lineUserId &&

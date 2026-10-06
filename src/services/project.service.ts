@@ -28,7 +28,7 @@ export class ProjectService {
     if (user.role === "USER") {
       conditions.push(eq(userProjectsSchema.userId, user.id));
       const whereClause = and(...conditions);
-      const items = await this.db
+      const itemsQuery = this.db
         .select({
           id: projectsSchema.id,
           name: projectsSchema.name,
@@ -46,22 +46,22 @@ export class ProjectService {
         .where(whereClause)
         .orderBy(order(sortColumns[query.sortBy]), order(projectsSchema.id))
         .limit(query.limit).offset(query.offset);
-        
-      const countRows = await this.db.select({ count: sql<number>`count(*)` }).from(projectsSchema).innerJoin(userProjectsSchema, eq(userProjectsSchema.projectId, projectsSchema.id)).where(whereClause);
+      const [items, countRows] = await Promise.all([itemsQuery, this.db.select({ count: sql<number>`count(*)` }).from(projectsSchema).innerJoin(userProjectsSchema, eq(userProjectsSchema.projectId, projectsSchema.id)).where(whereClause)]);
       return { items, total: Number(countRows[0]?.count || 0) };
     }
 
     if (query.memberId && user.role === "ADMIN") {
       conditions.push(eq(userProjectsSchema.userId, query.memberId));
       const whereClause = and(...conditions);
-      const items = await this.db.select({ id: projectsSchema.id, name: projectsSchema.name, description: projectsSchema.description, pictureUrl: projectsSchema.pictureUrl, isActive: projectsSchema.isActive, createdAt: projectsSchema.createdAt, updatedAt: projectsSchema.updatedAt }).from(projectsSchema).innerJoin(userProjectsSchema, eq(userProjectsSchema.projectId, projectsSchema.id)).where(whereClause).orderBy(order(sortColumns[query.sortBy]), order(projectsSchema.id)).limit(query.limit).offset(query.offset);
-      const countRows = await this.db.select({ count: sql<number>`count(*)` }).from(projectsSchema).innerJoin(userProjectsSchema, eq(userProjectsSchema.projectId, projectsSchema.id)).where(whereClause);
+      const [items, countRows] = await Promise.all([this.db.select({ id: projectsSchema.id, name: projectsSchema.name, description: projectsSchema.description, pictureUrl: projectsSchema.pictureUrl, isActive: projectsSchema.isActive, createdAt: projectsSchema.createdAt, updatedAt: projectsSchema.updatedAt }).from(projectsSchema).innerJoin(userProjectsSchema, eq(userProjectsSchema.projectId, projectsSchema.id)).where(whereClause).orderBy(order(sortColumns[query.sortBy]), order(projectsSchema.id)).limit(query.limit).offset(query.offset), this.db.select({ count: sql<number>`count(*)` }).from(projectsSchema).innerJoin(userProjectsSchema, eq(userProjectsSchema.projectId, projectsSchema.id)).where(whereClause)]);
       return { items, total: Number(countRows[0]?.count || 0) };
     }
 
     const whereClause = and(...conditions);
-    const items = await this.db.query.projects.findMany({ where: whereClause, orderBy: [order(sortColumns[query.sortBy]), order(projectsSchema.id)], limit: query.limit, offset: query.offset });
-    const countRows = await this.db.select({ count: sql<number>`count(*)` }).from(projectsSchema).where(whereClause);
+    const [items, countRows] = await Promise.all([
+      this.db.query.projects.findMany({ where: whereClause, orderBy: [order(sortColumns[query.sortBy]), order(projectsSchema.id)], limit: query.limit, offset: query.offset }),
+      this.db.select({ count: sql<number>`count(*)` }).from(projectsSchema).where(whereClause),
+    ]);
     return { items, total: Number(countRows[0]?.count || 0) };
   }
 
@@ -80,16 +80,16 @@ export class ProjectService {
    * Get project detail
    */
   async getProject(id: string, user?: User) {
-    if (user?.role === "USER") {
-      const membership = await this.db.query.userProjects.findFirst({ where: and(eq(userProjectsSchema.projectId, id), eq(userProjectsSchema.userId, user.id)) });
-      if (!membership) return null;
-    }
-    const project = await this.db.query.projects.findFirst({
-      where: (p: any, { eq }: any) => eq(p.id, id),
-    });
-    if (!project) return null;
-    const episodeCount = await this.db.select({ count: sql<number>`count(*)` }).from(episodesSchema).where(and(eq(episodesSchema.projectId, id), eq(episodesSchema.isActive, true)));
-    const clipCount = await this.db.select({ count: sql<number>`count(*)` }).from(clipsSchema).where(eq(clipsSchema.projectId, id));
+    // Membership, project and both counts are independent: one parallel round.
+    const [membership, project, episodeCount, clipCount] = await Promise.all([
+      user?.role === "USER"
+        ? this.db.query.userProjects.findFirst({ where: and(eq(userProjectsSchema.projectId, id), eq(userProjectsSchema.userId, user.id)), columns: { id: true } })
+        : Promise.resolve(true),
+      this.db.query.projects.findFirst({ where: (p: any, { eq }: any) => eq(p.id, id) }),
+      this.db.select({ count: sql<number>`count(*)` }).from(episodesSchema).where(and(eq(episodesSchema.projectId, id), eq(episodesSchema.isActive, true))),
+      this.db.select({ count: sql<number>`count(*)` }).from(clipsSchema).where(eq(clipsSchema.projectId, id)),
+    ]);
+    if (!membership || !project) return null;
     return { ...project, _count: { episodes: Number(episodeCount[0]?.count || 0), clips: Number(clipCount[0]?.count || 0) } };
   }
 
@@ -126,23 +126,21 @@ export class ProjectService {
    * Get project clips with access control
    */
   async getProjectClips(id: string, user: User, query: any) {
-    if (user.role === "USER") {
-      const membership = await this.db.query.userProjects.findFirst({
-        where: and(
-          eq(userProjectsSchema.projectId, id),
-          eq(userProjectsSchema.userId, user.id)
-        )
-      });
-      if (!membership) {
-        throw new Error("Forbidden: You are not assigned to this project");
-      }
+    const [membership, project] = await Promise.all([
+      user.role === "USER"
+        ? this.db.query.userProjects.findFirst({
+            where: and(eq(userProjectsSchema.projectId, id), eq(userProjectsSchema.userId, user.id)),
+            columns: { id: true },
+          })
+        : Promise.resolve(true),
+      this.db.query.projects.findFirst({
+        where: (p: any, { eq }: any) => eq(p.id, id),
+        columns: { id: true, name: true, description: true },
+      }),
+    ]);
+    if (!membership) {
+      throw new Error("Forbidden: You are not assigned to this project");
     }
-
-    const project = await this.db.query.projects.findFirst({
-      where: (p: any, { eq }: any) => eq(p.id, id),
-      columns: { id: true, name: true, description: true },
-    });
-
     if (!project) return null;
 
     const result = await ClipService.listClips({ db: this.db, projectId: id, user: user as any, ...query });
@@ -181,6 +179,20 @@ export class ProjectService {
       .values({ projectId, userId })
       .returning();
     return inserted;
+  }
+
+  async addProjectMembers(projectId: string, userIds: string[]) {
+    const existing = await this.db.query.userProjects.findMany({
+      where: and(eq(userProjectsSchema.projectId, projectId), inArray(userProjectsSchema.userId, userIds)),
+      columns: { userId: true },
+    });
+    const existingIds = new Set(existing.map((row: any) => row.userId));
+    const toInsert = Array.from(new Set(userIds)).filter((userId) => !existingIds.has(userId));
+    if (!toInsert.length) return [];
+    return this.db
+      .insert(userProjectsSchema)
+      .values(toInsert.map((userId) => ({ projectId, userId })))
+      .returning();
   }
 
   async removeProjectMember(projectId: string, userId: string) {

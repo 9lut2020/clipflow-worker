@@ -25,14 +25,14 @@ export const NotificationRouter = {
             type: event.type,
             title: `คลิปถูกสั่งแก้ไข`,
             message: `คลิป "${event.payload.clipName}" ถูกสั่งแก้ไขโดย ${event.payload.reviewerName}`,
-            linkUrl: `/projects/${event.payload.projectId}/clips/${event.payload.clipId}`
+            linkUrl: `/clips/${event.payload.clipId}`
           }).catch(err => console.error("[IN-APP NOTIFY ERROR]", err));
         }
         // 2. Dispatch LINE
         await LinePersonalService.sendNeedsRevision(event.payload).catch((err) =>
           console.error("[NOTIFICATION ROUTER] Needs Revision Failed", err)
         );
-        await push(event.payload.ownerId, "คลิปถูกสั่งแก้ไข", `คลิป \"${event.payload.clipName}\" ถูกสั่งแก้ไข`, `/projects/${event.payload.projectId}/clips/${event.payload.clipId}`);
+        await push(event.payload.ownerId, "คลิปถูกสั่งแก้ไข", `คลิป \"${event.payload.clipName}\" ถูกสั่งแก้ไข`, `/clips/${event.payload.clipId}`);
         break;
 
       case "APPROVED":
@@ -42,13 +42,13 @@ export const NotificationRouter = {
             type: event.type,
             title: `คลิปผ่านการอนุมัติ`,
             message: `คลิป "${event.payload.clipName}" ได้รับการอนุมัติแล้ว 🎉`,
-            linkUrl: `/projects/${event.payload.projectId}/clips/${event.payload.clipId}`
+            linkUrl: `/clips/${event.payload.clipId}`
           }).catch(err => console.error("[IN-APP NOTIFY ERROR]", err));
         }
         await LinePersonalService.sendApproved(event.payload).catch((err) =>
           console.error("[NOTIFICATION ROUTER] Approved Failed", err)
         );
-        await push(event.payload.ownerId, "คลิปผ่านการอนุมัติ", `คลิป \"${event.payload.clipName}\" ได้รับการอนุมัติแล้ว`, `/projects/${event.payload.projectId}/clips/${event.payload.clipId}`);
+        await push(event.payload.ownerId, "คลิปผ่านการอนุมัติ", `คลิป \"${event.payload.clipName}\" ได้รับการอนุมัติแล้ว`, `/clips/${event.payload.clipId}`);
         break;
 
       case "TASK_ASSIGNED":
@@ -58,13 +58,13 @@ export const NotificationRouter = {
             type: event.type,
             title: `คุณได้รับมอบหมายงานใหม่`,
             message: `คลิป "${event.payload.clipName}" ถูกมอบหมายให้คุณตัดต่อ`,
-            linkUrl: `/projects/${event.payload.projectId}/clips/${event.payload.clipId}`
+            linkUrl: `/clips/${event.payload.clipId}`
           }).catch(err => console.error("[IN-APP NOTIFY ERROR]", err));
         }
         await LinePersonalService.sendTaskAssigned(event.payload).catch((err) =>
           console.error("[NOTIFICATION ROUTER] Task Assigned Failed", err)
         );
-        await push(event.payload.assigneeId, "คุณได้รับมอบหมายงานใหม่", `คลิป \"${event.payload.clipName}\" ถูกมอบหมายให้คุณ`, `/projects/${event.payload.projectId}/clips/${event.payload.clipId}`);
+        await push(event.payload.assigneeId, "คุณได้รับมอบหมายงานใหม่", `คลิป \"${event.payload.clipName}\" ถูกมอบหมายให้คุณ`, `/clips/${event.payload.clipId}`);
         break;
 
       case "MULTI_TASK_ASSIGNED":

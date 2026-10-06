@@ -178,6 +178,7 @@ export const userProjects = pgTable("user_projects", {
 }, (table) => ({
   userIdIdx: index("idx_user_projects_user_id").on(table.userId),
   projectIdIdx: index("idx_user_projects_project_id").on(table.projectId),
+  projectUserIdx: index("idx_user_projects_project_user").on(table.projectId, table.userId),
 }));
 
 export const videoSizes = pgTable("video_sizes", {
@@ -286,6 +287,7 @@ export const revisions = pgTable("revisions", {
   clipIdIdx: index("idx_revisions_clip_id").on(table.clipId),
   submittedByIdx: index("idx_revisions_submitted_by").on(table.submittedBy),
   submittedAtIdx: index("idx_revisions_submitted_at").on(table.submittedAt),
+  clipRevisionNoUnique: uniqueIndex("uq_revisions_clip_revision_no").on(table.clipId, table.revisionNo),
 }));
 
 export const reviews = pgTable("reviews", {

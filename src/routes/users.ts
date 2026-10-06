@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { invalidateUserCache } from "../middleware/auth";
 import { eq, ilike, and, sql } from "drizzle-orm";
 import {
   createDb,
@@ -180,6 +181,7 @@ users.patch("/:id/role", adminOnly, zValidator("json", UserRoleUpdateSchema), as
   const service = new UserService(db);
 
   const updated = await service.updateUserRole(id, role as any, adminUser?.id || null);
+  invalidateUserCache(id);
 
   if (!updated) {
     return c.json({ status: "error", message: "User not found", data: null }, 404);
@@ -221,6 +223,7 @@ users.patch("/:id/status", adminOnly, zValidator("json", UserStatusUpdateSchema)
   const service = new UserService(db);
 
   const updated = await service.updateUserStatus(id, isActive, adminUser?.id || null);
+  invalidateUserCache(id);
 
   if (!updated) {
     return c.json({ status: "error", message: "User not found", data: null }, 404);

@@ -4,7 +4,8 @@ import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
 import { linkUserRichMenu } from "./services/notifications/line/line.client";
 
-import { createDb } from "@clipflow/db";
+import { createDb, createHyperdriveDb, useLocalNeonProxy, clips as clipsTable } from "@clipflow/db";
+import { sql } from "drizzle-orm";
 import { authMiddleware } from "./middleware/auth";
 import { projects } from "./routes/projects";
 import { episodes } from "./routes/episodes";
@@ -36,6 +37,9 @@ export type Env = {
   INTERNAL_API_SECRET?: string;
   ENVIRONMENT?: string;
   CORS_ORIGINS?: string;
+  FRONTEND_URL?: string;
+  DB_DRIVER?: "neon-http" | "hyperdrive";
+  NEON_FETCH_ENDPOINT?: string;
 };
 
 type Variables = {
@@ -99,8 +103,16 @@ app.use("/api/*", async (c: any, next: any) => {
 
 // Only persistent routes receive a DB instance. Health and other stateless
 // requests must not initialise database infrastructure.
+// DB_DRIVER=hyperdrive switches to pooled TCP through Cloudflare Hyperdrive;
+// otherwise each query is a stateless HTTPS call to Neon.
 const injectDb = async (c: any, next: any) => {
-  if (!c.get("db")) c.set("db", createDb(c.env.DATABASE_URL));
+  if (c.env.ENVIRONMENT === "development" && c.env.NEON_FETCH_ENDPOINT) {
+    useLocalNeonProxy(c.env.NEON_FETCH_ENDPOINT);
+  }
+  if (!c.get("db")) {
+    const hyperdriveUrl = c.env.DB_DRIVER === "hyperdrive" ? c.env.HYPERDRIVE?.connectionString : undefined;
+    c.set("db", hyperdriveUrl ? await createHyperdriveDb(hyperdriveUrl) : createDb(c.env.DATABASE_URL));
+  }
   await next();
 };
 
@@ -143,6 +155,21 @@ const showTypingIndicator = async (chatId: string, token: string, seconds = 20) 
   } catch (err) {
     console.error("[TYPING INDICATOR ERROR]", err);
   }
+};
+
+const countClipsByStatus = async (db: any) => {
+  const rows = await db
+    .select({ status: clipsTable.status, count: sql<number>`count(*)::int` })
+    .from(clipsTable)
+    .groupBy(clipsTable.status);
+  const byStatus = new Map<string, number>(rows.map((row: any) => [row.status, Number(row.count)]));
+  const get = (status: string) => byStatus.get(status) || 0;
+  return {
+    pending: get("PENDING_REVIEW") + get("IN_REVIEW") + get("RESUBMITTED"),
+    revision: get("NEEDS_REVISION"),
+    approved: get("APPROVED"),
+    total: Array.from(byStatus.values()).reduce((sum, value) => sum + value, 0),
+  };
 };
 
 app.post("/webhook/line", async (c: any) => {
@@ -209,8 +236,9 @@ app.post("/webhook/line", async (c: any) => {
         }
         if (userMsg === "งานของฉัน") {
           const myClips = await db.query.clips.findMany({
-            where: (clips: any, { eq, and, ne }: any) => 
-              and(eq(clips.ownerId, user.id), ne(clips.status, "APPROVED")),
+            where: (clips: any, { eq, and, notInArray }: any) =>
+              and(eq(clips.ownerId, user.id), notInArray(clips.status, ["APPROVED", "PUBLISHED", "CANCELLED"])),
+            limit: 50,
           });
 
           const flexContents = buildMyTasksFlexCard({
@@ -252,16 +280,13 @@ app.post("/webhook/line", async (c: any) => {
         // --- GROUP CHAT LOGIC ---
         if (userMsg === "สรุปงานวันนี้") {
           await showTypingIndicator(chatId, token);
-          const allClips = await db.query.clips.findMany();
-          const pending = allClips.filter((c: any) => c.status === "PENDING_REVIEW" || c.status === "IN_REVIEW").length;
-          const revision = allClips.filter((c: any) => c.status === "NEEDS_REVISION").length;
-          const approved = allClips.filter((c: any) => c.status === "APPROVED").length;
+          const { pending, revision, approved, total } = await countClipsByStatus(db);
 
           const flexContents = buildDailySummaryFlexCard({
             pending,
             revision,
             approved,
-            total: allClips.length,
+            total,
           });
 
           await fetch("https://api.line.me/v2/bot/message/reply", {
@@ -278,9 +303,7 @@ app.post("/webhook/line", async (c: any) => {
 
         } else if (userMsg === "งานที่ต้องตรวจ") {
           await showTypingIndicator(chatId, token);
-          const allClips = await db.query.clips.findMany();
-          const pending = allClips.filter((c: any) => c.status === "PENDING_REVIEW" || c.status === "IN_REVIEW").length;
-          const revision = allClips.filter((c: any) => c.status === "NEEDS_REVISION").length;
+          const { pending, revision } = await countClipsByStatus(db);
 
           const flexContents = buildPendingReviewFlexCard({ pending, revision });
 
@@ -340,9 +363,10 @@ app.notFound((c: any) =>
 
 // ─── Error Handler ─────────────────────────────────────────────────────────
 app.onError((err: any, c: any) => {
-  console.error("[ERROR]", err.message);
+  console.error("[ERROR]", err);
+  // Do not leak driver/SQL messages to clients.
   return c.json(
-    { success: false, error: { code: "INTERNAL_ERROR", message: err.message } },
+    { status: "error", code: "INTERNAL_ERROR", message: "Internal server error", data: null },
     500,
   );
 });
@@ -351,7 +375,8 @@ export default {
   fetch: app.fetch,
 
   async scheduled(event: ScheduledEvent, env: Env, _ctx: ExecutionContext) {
-    if (event.cron === "0 0 * * *") {
+    // 17:00 UTC = 00:00 Asia/Bangkok
+    if (event.cron === "0 17 * * *") {
       await aggregateDailyMetrics(env);
     }
   },

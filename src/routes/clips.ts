@@ -6,7 +6,7 @@ import { zValidator } from "@hono/zod-validator";
 import { ClipSubmitRevisionSchema, ClipScheduleSchema, ClipFastSubmitSchema } from "@clipflow/validations";
 import { logActivity } from "../services/activity-logger";
 // Static imports — avoids re-loading on every request
-import { eq, desc } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, notInArray, sql } from "drizzle-orm";
 import { clips as clipsTable, clipPublishSchedules, publishedPosts, users } from "@clipflow/db";
 import { apiError, handleApiError, paginated, parseDate, parseListQuery, parseMultiValue } from "../lib/api-contract";
 import { adminOnly } from "../middleware/role";
@@ -42,6 +42,77 @@ clips.get("/", async (c: Context) => {
     c.header("Server-Timing", existingTiming ? `${existingTiming}, ${queryTiming}` : queryTiming);
     return c.json({ status: "success", message: "Clips retrieved successfully", data: paginated(result.items, result.total, query.page, query.limit) });
   } catch (error) { return handleApiError(c, error); }
+});
+
+/**
+ * GET /clips/stats?days=7|30
+ * Dashboard aggregates over every clip the caller can see (not just the first
+ * page): counts by status, a daily trend and the top creators.
+ */
+clips.get("/stats", async (c: Context) => {
+  try {
+    const db = c.get("db");
+    const user = c.get("user") as any;
+    const daysParam = c.req.query("days");
+    const days = daysParam === "7" || daysParam === "30" ? Number(daysParam) : null;
+    const trendDays = days ?? 7;
+
+    const scope: any[] = [];
+    if (user?.role === "USER") scope.push(eq(clipsTable.ownerId, user.id));
+    if (user?.role === "REVIEWER") scope.push(notInArray(clipsTable.status, ["DRAFT", "CANCELLED"]));
+    const windowed = days
+      ? [...scope, gte(clipsTable.createdAt, sql`now() - make_interval(days => ${days})`)]
+      : scope;
+    const where = windowed.length ? and(...windowed) : undefined;
+    const bangkokDay = (column: any) => sql`to_char(${column} AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')`;
+    const trendStart = sql`date_trunc('day', now() AT TIME ZONE 'Asia/Bangkok') - make_interval(days => ${trendDays - 1})`;
+
+    const [statusRows, submittedRows, approvedRows, creatorRows] = await Promise.all([
+      db.select({ status: clipsTable.status, count: sql<number>`count(*)::int` })
+        .from(clipsTable).where(where).groupBy(clipsTable.status),
+      db.select({ day: bangkokDay(clipsTable.createdAt), count: sql<number>`count(*)::int` })
+        .from(clipsTable)
+        .where(and(...scope, sql`(${clipsTable.createdAt} AT TIME ZONE 'Asia/Bangkok') >= ${trendStart}`))
+        .groupBy(sql`1`),
+      db.select({ day: bangkokDay(clipsTable.updatedAt), count: sql<number>`count(*)::int` })
+        .from(clipsTable)
+        .where(and(...scope, eq(clipsTable.status, "APPROVED"), sql`(${clipsTable.updatedAt} AT TIME ZONE 'Asia/Bangkok') >= ${trendStart}`))
+        .groupBy(sql`1`),
+      db.select({
+        id: users.id,
+        name: users.displayName,
+        pictureUrl: users.pictureUrl,
+        total: sql<number>`count(*)::int`,
+        approved: sql<number>`count(*) filter (where ${clipsTable.status} = 'APPROVED')::int`,
+      })
+        .from(clipsTable)
+        .innerJoin(users, eq(users.id, clipsTable.ownerId))
+        .where(where)
+        .groupBy(users.id, users.displayName, users.pictureUrl)
+        .orderBy(desc(sql`count(*) filter (where ${clipsTable.status} = 'APPROVED')`))
+        .limit(10),
+    ]);
+
+    const byStatus = Object.fromEntries(statusRows.map((row: any) => [row.status, Number(row.count)]));
+    const total = statusRows.reduce((sum: number, row: any) => sum + Number(row.count), 0);
+    const submittedByDay = new Map<string, number>(submittedRows.map((row: any) => [String(row.day), Number(row.count)]));
+    const approvedByDay = new Map<string, number>(approvedRows.map((row: any) => [String(row.day), Number(row.count)]));
+    const todayBangkok = new Date(Date.now() + 7 * 3600 * 1000);
+    const trend = Array.from({ length: trendDays }, (_, index) => {
+      const d = new Date(todayBangkok);
+      d.setUTCDate(d.getUTCDate() - (trendDays - 1 - index));
+      const key = d.toISOString().slice(0, 10);
+      return { date: key, submitted: submittedByDay.get(key) || 0, approved: approvedByDay.get(key) || 0 };
+    });
+
+    return c.json({
+      status: "success",
+      message: "Clip stats retrieved successfully",
+      data: { byStatus, total, trend, creators: creatorRows },
+    });
+  } catch (error) {
+    return handleApiError(c, error);
+  }
 });
 
 /**
@@ -229,6 +300,22 @@ clips.post("/fast-submit", zValidator("json", ClipFastSubmitSchema), async (c) =
     return c.json({ status: "error", message: "Unauthorized", data: null }, 401);
   }
 
+  // The episode must belong to the project, and a USER must be a member of it.
+  const [episode, membership] = await Promise.all([
+    db.query.episodes.findFirst({
+      where: (row: any, { and, eq }: any) => and(eq(row.id, episodeId), eq(row.projectId, projectId)),
+      columns: { id: true },
+    }),
+    c.get("user")?.role === "USER"
+      ? db.query.userProjects.findFirst({
+          where: (row: any, { and, eq }: any) => and(eq(row.projectId, projectId), eq(row.userId, userId)),
+          columns: { id: true },
+        })
+      : Promise.resolve(true),
+  ]);
+  if (!episode) return c.json({ status: "error", message: "Episode not found in this project", data: null }, 404);
+  if (!membership) return c.json({ status: "error", message: "Forbidden: You are not assigned to this project", data: null }, 403);
+
   try {
     // 1. Create the clip
     const [newClip] = await db
@@ -297,6 +384,19 @@ clips.post("/:id/revisions", zValidator("json", ClipSubmitRevisionSchema), async
   const userId = c.get("user")?.id;
   if (!userId) {
     return c.json({ status: "error", message: "Unauthorized", data: null }, 401);
+  }
+
+  // USER may only submit to clips they own; reviewers/admins to any clip.
+  const actor = c.get("user") as any;
+  const targetClip = await db.query.clips.findFirst({
+    where: (row: any, { eq }: any) => eq(row.id, clipId),
+    columns: { id: true, ownerId: true, status: true },
+  });
+  if (!targetClip || (actor?.role === "USER" && targetClip.ownerId !== userId)) {
+    return c.json({ status: "error", message: "Clip not found", data: null }, 404);
+  }
+  if (actor?.role === "USER" && ["APPROVED", "PUBLISHED", "CANCELLED"].includes(targetClip.status)) {
+    return c.json({ status: "error", message: "This clip no longer accepts revisions", data: null }, 409);
   }
 
   try {
@@ -378,15 +478,13 @@ clips.get("/:id/published-posts", adminOnly, async (c: Context) => {
     const from = parseDate(c.req.query("from"), "from");
     const to = parseDate(c.req.query("to"), "to");
 
-    const { gte, lte } = await import("drizzle-orm");
-
     const conditions: any[] = [eq(publishedPosts.clipId, clipId)];
     if (platformFilter) conditions.push(eq(publishedPosts.platform, platformFilter as any));
     if (from) conditions.push(gte(publishedPosts.publishedAt, new Date(`${from}T00:00:00Z`)));
     if (to) conditions.push(lte(publishedPosts.publishedAt, new Date(`${to}T23:59:59Z`)));
-    const where = conditions.length ? (await import("drizzle-orm")).and(...conditions) : eq(publishedPosts.clipId, clipId);
+    const where = and(...conditions);
 
-    const dir = query.sortOrder === "asc" ? (await import("drizzle-orm")).asc : desc;
+    const dir = query.sortOrder === "asc" ? asc : desc;
 
     const [posts, totalRows] = await Promise.all([
       db.select({
@@ -404,7 +502,7 @@ clips.get("/:id/published-posts", adminOnly, async (c: Context) => {
       .orderBy(dir(publishedPosts.publishedAt))
       .limit(query.limit)
       .offset(query.offset),
-      db.select({ count: (await import("drizzle-orm")).sql<number>`count(*)::int` })
+      db.select({ count: sql<number>`count(*)::int` })
         .from(publishedPosts)
         .where(where),
     ]);

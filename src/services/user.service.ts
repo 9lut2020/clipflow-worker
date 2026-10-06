@@ -1,6 +1,5 @@
 import { and, asc, desc, eq, ilike, or, sql } from "drizzle-orm";
-import { createDb, users as usersSchema } from "@clipflow/db";
-import { UserTransaction } from "./user-transaction";
+import { createDb, users as usersSchema, clips as clipsSchema } from "@clipflow/db";
 import { logActivity } from "./activity-logger";
 
 export class UserService {
@@ -142,21 +141,20 @@ export class UserService {
   }
 
   async getUserStats(id: string) {
-    const userClips = await this.db.query.clips.findMany({
-      where: (clipsRow: any, { eq }: any) => eq(clipsRow.ownerId, id),
-    });
+    // Count in SQL instead of loading every clip the user owns.
+    const rows = await this.db
+      .select({ status: clipsSchema.status, count: sql<number>`count(*)::int` })
+      .from(clipsSchema)
+      .where(eq(clipsSchema.ownerId, id))
+      .groupBy(clipsSchema.status);
+    const byStatus = new Map<string, number>(rows.map((row: any) => [row.status, Number(row.count)]));
+    const totalClips = Array.from(byStatus.values()).reduce((sum, value) => sum + value, 0);
 
-    const totalClips = userClips.length;
-    const approvedClips = userClips.filter(
-      (clip: any) => clip.status === "APPROVED",
-    ).length;
-    const pendingClips = userClips.filter(
-      (clip: any) => clip.status === "PENDING_REVIEW",
-    ).length;
-    const revisionClips = userClips.filter(
-      (clip: any) => clip.status === "NEEDS_REVISION",
-    ).length;
-
-    return { totalClips, approvedClips, pendingClips, revisionClips };
+    return {
+      totalClips,
+      approvedClips: byStatus.get("APPROVED") || 0,
+      pendingClips: byStatus.get("PENDING_REVIEW") || 0,
+      revisionClips: byStatus.get("NEEDS_REVISION") || 0,
+    };
   }
 }

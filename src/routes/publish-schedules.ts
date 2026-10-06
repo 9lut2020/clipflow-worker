@@ -4,6 +4,7 @@ import {
   clipPublishSchedules,
   clips,
   createDb,
+  runBatch,
   publishedPosts,
   projectPublishSlots,
   projects,
@@ -301,105 +302,158 @@ publishSchedulesRouter.post("/suggest-bulk", adminOnly, async (c) => {
   return c.json({ status: "success", data: { suggestions, skipped } });
 });
 
+const toBangkokTime = (date: Date) =>
+  new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(date);
+
+// neon-http has no interactive transactions; runBatch sends every statement in
+// one request and runs them atomically, which is what these writes need.
+const upsertScheduleStatements = (db: any, item: { projectId: string; clipId: string; slotId: string | null; publishDate: string; publishTime: string; isRepeat: boolean; note: string | null; scheduledAt: Date; createdBy: string | null }) => [
+  db.insert(clipPublishSchedules).values({
+    projectId: item.projectId,
+    clipId: item.clipId,
+    slotId: item.slotId,
+    publishDate: item.publishDate,
+    publishTime: item.publishTime,
+    isRepeat: item.isRepeat,
+    note: item.note,
+    createdBy: item.createdBy,
+  }).onConflictDoUpdate({
+    target: clipPublishSchedules.clipId,
+    set: { projectId: item.projectId, slotId: item.slotId, publishDate: item.publishDate, publishTime: item.publishTime, isRepeat: item.isRepeat, note: item.note, status: "SCHEDULED", updatedAt: new Date() },
+  }).returning(),
+  db.update(clips).set({ scheduledPublishAt: item.scheduledAt, updatedAt: new Date() }).where(eq(clips.id, item.clipId)),
+];
+
 publishSchedulesRouter.put("/queue/:clipId", adminOnly, async (c) => {
+  const db = c.get("db");
   const clipId = c.req.param("clipId") as string;
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => ({}));
   const slotId = String(body.slotId || "");
-  if (!slotId) return c.json({ status: "error", code: "VALIDATION_ERROR", message: "slotId is required", data: null }, 400);
-  const clip = await c.get("db").query.clips.findFirst({
+  const allowSameDay = Boolean(body.allowSameDay);
+  if (!slotId && !body.scheduledAt) return c.json({ status: "error", code: "VALIDATION_ERROR", message: "slotId or scheduledAt is required", data: null }, 400);
+  const clip = await db.query.clips.findFirst({
     where: (row: any, { eq }: any) => eq(row.id, clipId),
     columns: { id: true, projectId: true, name: true },
   });
   if (!clip) return c.json({ status: "error", message: "Clip not found" }, 404);
-  const slot = await c.get("db").query.projectPublishSlots.findFirst({
-    where: (row: any, { and, eq }: any) => and(eq(row.id, slotId), eq(row.projectId, clip.projectId), eq(row.isActive, true)),
-  });
-  if (!slot) return c.json({ status: "error", code: "VALIDATION_ERROR", message: "An active project slot is required", data: null }, 400);
-  const firstDate = bangkokDateString();
+
   let publishDate = "";
-  for (let offset = 0; offset <= 370; offset += 1) {
-    const candidate = addDays(firstDate, offset);
-    if (dayOfWeek(candidate) !== slot.dayOfWeek) continue;
-    const candidateAt = new Date(`${candidate}T${slot.publishTime}+07:00`);
-    if (candidateAt <= new Date()) continue;
-    const occupied = await c.get("db").query.clipPublishSchedules.findFirst({
-      where: (row: any, { and, eq, ne }: any) => and(eq(row.projectId, clip.projectId), eq(row.publishDate, candidate), ne(row.clipId, clipId), eq(row.status, "SCHEDULED")),
+  let publishTime = "";
+  let scheduledAt: Date;
+
+  if (slotId) {
+    const slot = await db.query.projectPublishSlots.findFirst({
+      where: (row: any, { and, eq }: any) => and(eq(row.id, slotId), eq(row.projectId, clip.projectId), eq(row.isActive, true)),
     });
-    if (!occupied) { publishDate = candidate; break; }
+    if (!slot) return c.json({ status: "error", code: "VALIDATION_ERROR", message: "An active project slot is required", data: null }, 400);
+    // Load every occupied date for the next year once instead of querying day by day.
+    const firstDate = bangkokDateString();
+    const lastDate = addDays(firstDate, 370);
+    const occupiedRows = await db.query.clipPublishSchedules.findMany({
+      where: (row: any, { and, eq, ne, gte, lte }: any) => and(eq(row.projectId, clip.projectId), ne(row.clipId, clipId), eq(row.status, "SCHEDULED"), gte(row.publishDate, firstDate), lte(row.publishDate, lastDate)),
+      columns: { publishDate: true },
+    });
+    const occupied = new Set(occupiedRows.map((row: any) => String(row.publishDate)));
+    for (let offset = 0; offset <= 370; offset += 1) {
+      const candidate = addDays(firstDate, offset);
+      if (dayOfWeek(candidate) !== slot.dayOfWeek) continue;
+      if (new Date(`${candidate}T${slot.publishTime}+07:00`) <= new Date()) continue;
+      if (!occupied.has(candidate)) { publishDate = candidate; break; }
+    }
+    if (!publishDate) return c.json({ status: "error", code: "NO_AVAILABLE_SLOT", message: "No available project slot", data: null }, 409);
+    publishTime = slot.publishTime;
+    scheduledAt = new Date(`${publishDate}T${publishTime}+07:00`);
+  } else {
+    scheduledAt = new Date(String(body.scheduledAt));
+    if (Number.isNaN(scheduledAt.getTime())) return c.json({ status: "error", code: "VALIDATION_ERROR", message: "Invalid scheduledAt", data: null }, 400);
+    publishDate = bangkokDateString(scheduledAt);
+    publishTime = toBangkokTime(scheduledAt);
+    if (!allowSameDay) {
+      const conflict = await db.query.clipPublishSchedules.findFirst({
+        where: (row: any, { and, eq, ne }: any) => and(eq(row.projectId, clip.projectId), eq(row.publishDate, publishDate), ne(row.clipId, clipId), eq(row.status, "SCHEDULED")),
+        with: { clip: { columns: { id: true, name: true } } },
+      });
+      if (conflict) return c.json({ status: "error", code: "SCHEDULE_CONFLICT", message: "รายการนี้มีคลิปในวันดังกล่าวแล้ว", data: { conflict } }, 409);
+    }
   }
-  if (!publishDate) return c.json({ status: "error", code: "NO_AVAILABLE_SLOT", message: "No available project slot", data: null }, 409);
-  const scheduledAt = new Date(`${publishDate}T${slot.publishTime}+07:00`);
-  const publishTime = slot.publishTime;
-  const conflict = await c.get("db").query.clipPublishSchedules.findFirst({
-    where: (row: any, { and, eq, ne }: any) => and(eq(row.projectId, clip.projectId), eq(row.publishDate, publishDate), ne(row.clipId, clipId), eq(row.status, "SCHEDULED")),
-    with: { clip: { columns: { id: true, name: true } } },
-  });
-  if (conflict && !body.allowSameDay) {
-    return c.json({ status: "error", code: "SCHEDULE_CONFLICT", message: "รายการนี้มีคลิปในวันดังกล่าวแล้ว", data: { conflict } }, 409);
-  }
-  const result = await c.get("db").transaction(async (tx: any) => {
-    const [schedule] = await tx.insert(clipPublishSchedules).values({
-      projectId: clip.projectId,
-      clipId,
-      slotId,
-      publishDate,
-      publishTime,
-      isRepeat: Boolean(body.allowSameDay),
-      note: body.note || null,
-      createdBy: c.get("user")?.id || null,
-    }).onConflictDoUpdate({
-      target: clipPublishSchedules.clipId,
-      set: { slotId, publishDate, publishTime, isRepeat: false, note: body.note || null, status: "SCHEDULED", updatedAt: new Date() },
-    }).returning();
-    await tx.update(clips).set({ scheduledPublishAt: scheduledAt, updatedAt: new Date() }).where(eq(clips.id, clipId));
-    return schedule;
-  });
-  return c.json({ status: "success", data: result });
+
+  const [inserted] = await runBatch(db, (q) => upsertScheduleStatements(q, {
+    projectId: clip.projectId,
+    clipId,
+    slotId: slotId || null,
+    publishDate,
+    publishTime,
+    isRepeat: allowSameDay,
+    note: body.note || null,
+    scheduledAt,
+    createdBy: c.get("user")?.id || null,
+  }));
+  return c.json({ status: "success", data: (inserted as any[])[0] });
 });
 
 publishSchedulesRouter.delete("/queue/:clipId", adminOnly, async (c) => {
+  const db = c.get("db");
   const clipId = c.req.param("clipId") as string;
-  await c.get("db").transaction(async (tx: any) => {
-    await tx.delete(clipPublishSchedules).where(eq(clipPublishSchedules.clipId, clipId));
-    await tx.update(clips).set({ scheduledPublishAt: null, updatedAt: new Date() }).where(eq(clips.id, clipId));
-  });
+  await runBatch(db, (q) => [
+    q.delete(clipPublishSchedules).where(eq(clipPublishSchedules.clipId, clipId)),
+    q.update(clips).set({ scheduledPublishAt: null, updatedAt: new Date() }).where(eq(clips.id, clipId)),
+  ]);
   return c.json({ status: "success", data: { clipId } });
 });
 
-publishSchedulesRouter.post("/queue/bulk", async (c) => {
+publishSchedulesRouter.post("/queue/bulk", adminOnly, async (c) => {
+  const db = c.get("db");
   const body = await c.req.json().catch(() => ({}));
   const entries = Array.isArray(body.items) ? body.items : [];
   if (!entries.length || entries.length > 100) {
     return c.json({ status: "error", code: "VALIDATION_ERROR", message: "items must contain between 1 and 100 schedules", data: null, errors: {} }, 400);
   }
-  const prepared: any[] = [];
+  const parsed: any[] = [];
   for (const entry of entries) {
     const clipId = String(entry.clipId || "");
     const scheduledAt = new Date(String(entry.scheduledAt || ""));
     if (!clipId || Number.isNaN(scheduledAt.getTime())) return c.json({ status: "error", code: "VALIDATION_ERROR", message: "Every item requires clipId and a valid scheduledAt", data: null, errors: {} }, 400);
-    const clip = await c.get("db").query.clips.findFirst({ where: (row: any, { eq }: any) => eq(row.id, clipId), columns: { id: true, projectId: true, name: true } });
-    if (!clip) return c.json({ status: "error", code: "NOT_FOUND", message: "Clip not found", data: null, errors: { clipId } }, 404);
-    prepared.push({ entry, clip, clipId, scheduledAt, publishDate: bangkokDateString(scheduledAt), publishTime: new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(scheduledAt) });
+    parsed.push({ entry, clipId, scheduledAt, publishDate: bangkokDateString(scheduledAt), publishTime: toBangkokTime(scheduledAt) });
   }
+  const clipRows = await db.query.clips.findMany({
+    where: (row: any, { inArray }: any) => inArray(row.id, parsed.map((item) => item.clipId)),
+    columns: { id: true, projectId: true, name: true },
+  });
+  const clipById = new Map<string, any>(clipRows.map((row: any) => [row.id, row]));
+  const prepared: any[] = [];
+  for (const item of parsed) {
+    const clip = clipById.get(item.clipId);
+    if (!clip) return c.json({ status: "error", code: "NOT_FOUND", message: "Clip not found", data: null, errors: { clipId: item.clipId } }, 404);
+    prepared.push({ ...item, clip });
+  }
+
+  const projectIds = Array.from(new Set(prepared.map((item) => item.clip.projectId)));
+  const dates = Array.from(new Set(prepared.map((item) => item.publishDate)));
+  const existing = await db.query.clipPublishSchedules.findMany({
+    where: (row: any, { and, eq, inArray }: any) => and(inArray(row.projectId, projectIds), inArray(row.publishDate, dates), eq(row.status, "SCHEDULED")),
+    with: { clip: { columns: { id: true, name: true } } },
+  });
+  const requestClipIds = new Set(prepared.map((item) => item.clipId));
   const conflicts: any[] = [];
   for (const item of prepared) {
     if (item.entry.allowSameDay) continue;
-    const conflict = await c.get("db").query.clipPublishSchedules.findFirst({
-      where: (row: any, { and, eq, ne }: any) => and(eq(row.projectId, item.clip.projectId), eq(row.publishDate, item.publishDate), ne(row.clipId, item.clipId), eq(row.status, "SCHEDULED")),
-      with: { clip: { columns: { id: true, name: true } } },
-    });
+    const conflict = existing.find((row: any) => row.projectId === item.clip.projectId && String(row.publishDate) === item.publishDate && row.clipId !== item.clipId && !requestClipIds.has(row.clipId));
     const duplicateInRequest = prepared.find((other) => other !== item && other.clip.projectId === item.clip.projectId && other.publishDate === item.publishDate && !other.entry.allowSameDay);
     if (conflict || duplicateInRequest) conflicts.push({ clipId: item.clipId, publishDate: item.publishDate, conflict: conflict || { clip: duplicateInRequest.clip } });
   }
   if (conflicts.length) return c.json({ status: "error", code: "SCHEDULE_CONFLICT", message: "Some schedules conflict", data: { conflicts }, errors: {} }, 409);
-  const schedules = await c.get("db").transaction(async (tx: any) => {
-    const saved = [];
-    for (const item of prepared) {
-      const [schedule] = await tx.insert(clipPublishSchedules).values({ projectId: item.clip.projectId, clipId: item.clipId, slotId: item.entry.slotId || null, publishDate: item.publishDate, publishTime: item.publishTime, isRepeat: Boolean(item.entry.allowSameDay), note: item.entry.note || null, createdBy: c.get("user")?.id || null }).onConflictDoUpdate({ target: clipPublishSchedules.clipId, set: { slotId: item.entry.slotId || null, publishDate: item.publishDate, publishTime: item.publishTime, isRepeat: Boolean(item.entry.allowSameDay), note: item.entry.note || null, status: "SCHEDULED", updatedAt: new Date() } }).returning();
-      await tx.update(clips).set({ scheduledPublishAt: item.scheduledAt, updatedAt: new Date() }).where(eq(clips.id, item.clipId));
-      saved.push(schedule);
-    }
-    return saved;
-  });
+
+  const results = await runBatch(db, (q) => prepared.flatMap((item) => upsertScheduleStatements(q, {
+    projectId: item.clip.projectId,
+    clipId: item.clipId,
+    slotId: item.entry.slotId || null,
+    publishDate: item.publishDate,
+    publishTime: item.publishTime,
+    isRepeat: Boolean(item.entry.allowSameDay),
+    note: item.entry.note || null,
+    scheduledAt: item.scheduledAt,
+    createdBy: c.get("user")?.id || null,
+  })));
+  const schedules = results.filter((_: unknown, index: number) => index % 2 === 0).map((rows: any) => rows[0]);
   return c.json({ status: "success", message: "Publish queue saved successfully", data: schedules }, 201);
 });
