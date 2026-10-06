@@ -7,7 +7,7 @@ export class UserService {
 
   async listUsers(query: { q?: string; role?: string; isActive?: boolean; limit: number; offset: number; sortBy: "displayName" | "lastActiveAt" | "createdAt"; sortOrder: "asc" | "desc" }) {
     const conditions: any[] = [];
-    if (query.q) conditions.push(or(ilike(usersSchema.displayName, `%${query.q}%`), ilike(usersSchema.lineUserId, `%${query.q}%`)));
+    if (query.q) conditions.push(or(ilike(usersSchema.displayName, `%${query.q}%`), ilike(usersSchema.lineDisplayName, `%${query.q}%`), ilike(usersSchema.lineUserId, `%${query.q}%`)));
     if (query.role) conditions.push(eq(usersSchema.role, query.role as any));
     if (query.isActive !== undefined) conditions.push(eq(usersSchema.isActive, query.isActive));
     const whereClause = conditions.length ? and(...conditions) : undefined;
@@ -26,11 +26,17 @@ export class UserService {
     });
   }
 
-  async updateUserProfile(id: string, displayName: string) {
+  async updateUserProfile(
+    id: string,
+    data: { displayName?: string; phone?: string | null; email?: string | null; completeProfile?: boolean },
+  ) {
     const [updatedUser] = await this.db
       .update(usersSchema)
       .set({
-        displayName,
+        ...(data.displayName !== undefined && { displayName: data.displayName }),
+        ...(data.phone !== undefined && { phone: data.phone }),
+        ...(data.email !== undefined && { email: data.email }),
+        ...(data.completeProfile && { profileCompletedAt: new Date() }),
         updatedAt: new Date(),
       })
       .where(eq(usersSchema.id, id))
@@ -53,7 +59,8 @@ export class UserService {
       const [updated] = await this.db
         .update(usersSchema)
         .set({
-          displayName: payload.displayName || existingUser.displayName,
+          // Keep the user's chosen display name; only the LINE name follows LINE.
+          lineDisplayName: payload.displayName || existingUser.lineDisplayName,
           pictureUrl: payload.pictureUrl || existingUser.pictureUrl,
           ...(payload.role ? { role: payload.role } : {}),
           lastActiveAt: new Date(),
@@ -74,6 +81,7 @@ export class UserService {
       .values({
         lineUserId: payload.lineUserId,
         displayName: payload.displayName || "LINE User",
+        lineDisplayName: payload.displayName || null,
         pictureUrl: payload.pictureUrl || null,
         role: "USER",
         isActive: true,

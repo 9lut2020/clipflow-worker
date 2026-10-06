@@ -118,7 +118,15 @@ export const auditLogs = pgTable("audit_logs", {
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   lineUserId: varchar("line_user_id", { length: 100 }).unique(),
+  // Name shown in ClipFlow; the user may change it.
   displayName: varchar("display_name", { length: 100 }).notNull(),
+  // Name on the user's LINE profile, refreshed on every login. Kept separate so
+  // admins can find the person in LINE chats.
+  lineDisplayName: varchar("line_display_name", { length: 255 }),
+  phone: varchar("phone", { length: 30 }),
+  email: varchar("email", { length: 255 }),
+  // Set once the user confirms their profile (first-login prompt).
+  profileCompletedAt: timestamp("profile_completed_at", { withTimezone: true }),
   pictureUrl: text("picture_url"),
   role: userRoleEnum("role").default("USER").notNull(),
   isActive: boolean("is_active").default(true).notNull(),

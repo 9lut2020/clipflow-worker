@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { NotificationService } from "../services/notifications/notification.service";
 import { invalidateUserCache } from "../middleware/auth";
-import { eq, ilike, and, sql } from "drizzle-orm";
+import { eq, ilike, and, or, sql } from "drizzle-orm";
 import {
   createDb,
   users as usersSchema,
@@ -34,7 +34,10 @@ users.get("/", adminOnly, async (c: Context) => {
 
     const conditions: any[] = [];
     if (query.q) {
-      conditions.push(ilike(usersSchema.displayName, `%${query.q}%`));
+      conditions.push(or(
+        ilike(usersSchema.displayName, `%${query.q}%`),
+        ilike(usersSchema.lineDisplayName, `%${query.q}%`),
+      ));
     }
     if (roleFilter) {
       conditions.push(eq(usersSchema.role, roleFilter as any));
@@ -64,6 +67,10 @@ users.get("/", adminOnly, async (c: Context) => {
           isActive: true,
           pictureUrl: true,
           lineUserId: true,
+          lineDisplayName: true,
+          phone: true,
+          email: true,
+          profileCompletedAt: true,
           createdAt: true,
           lastActiveAt: true,
         },
@@ -149,10 +156,11 @@ users.patch("/:id/profile", zValidator("json", UserProfileUpdateSchema), async (
     return c.json({ status: "error", message: "Forbidden", data: null }, 403);
   }
 
-  const { displayName } = c.req.valid("json");
+  const body = c.req.valid("json");
   const service = new UserService(db);
 
-  const updatedUser = await service.updateUserProfile(id, displayName);
+  const updatedUser = await service.updateUserProfile(id, body);
+  invalidateUserCache(id);
 
   if (!updatedUser) {
     return c.json({ status: "error", message: "User not found", data: null }, 404);

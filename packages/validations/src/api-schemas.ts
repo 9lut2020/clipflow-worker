@@ -64,8 +64,15 @@ export const UserSyncSchema = z.object({
   pictureUrl: z.string().url().optional().or(z.literal("")).nullable(),
 });
 
+const optionalText = (schema: z.ZodString) =>
+  z.preprocess((value) => (typeof value === "string" && value.trim() === "" ? null : value), schema.nullable().optional());
+
 export const UserProfileUpdateSchema = z.object({
-  displayName: z.string().min(1, "Display name is required").max(100, "Display name is too long"),
+  displayName: z.string().trim().min(1, "Display name is required").max(100, "Display name is too long").optional(),
+  phone: optionalText(z.string().trim().regex(/^[0-9+\-\s()]{9,20}$/, "Invalid phone number")),
+  email: optionalText(z.string().trim().email("Invalid email").max(255)),
+  // true when submitted from the first-login profile prompt
+  completeProfile: z.boolean().optional(),
 });
 
 export const UserRoleUpdateSchema = z.object({
