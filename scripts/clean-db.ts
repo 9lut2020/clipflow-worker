@@ -2,8 +2,12 @@ import { sql } from "drizzle-orm";
 import { createDb } from "@clipflow/db";
 
 async function main() {
-  const dbUrl = "postgresql://neondb_owner:REDACTED@ep-long-shadow-azvybi45-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require";
-
+  // Never hardcode a connection string here: this script wipes every table.
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) throw new Error("Set DATABASE_URL (point it at a Neon branch, not production).");
+  if (!process.argv.includes("--yes-delete-all-data")) {
+    throw new Error("This deletes ALL application data. Re-run with --yes-delete-all-data to confirm.");
+  }
 
   console.log("Connecting to DB...");
   const db = createDb(dbUrl);
