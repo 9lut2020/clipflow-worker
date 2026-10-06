@@ -212,7 +212,7 @@ projects.get("/:id/manage", adminOnly, async (c: any) => {
     }),
     service.getProjectMembers(id, { limit: 5000, offset: 0, sortBy: "displayName", sortOrder: "asc" }),
     db.query.episodes.findMany({ where: (ep: any, { eq }: any) => eq(ep.projectId, id), limit: 5000 }),
-    ClipService.listClips({ db, projectId: id, limit: 5000, offset: 0, user }),
+    ClipService.listClips({ db, projectId: id, limit: 5000, offset: 0, user, sortBy: "episodeOrder", sortOrder: "asc" }),
     db.query.videoSizes.findMany({ where: (vs: any, { eq }: any) => eq(vs.isActive, true), limit: 100 })
   ]);
 
@@ -243,7 +243,10 @@ projects.get("/:id/clips", async (c: any) => {
   const service = new ProjectService(db);
 
   try {
-    const query = parseListQuery(c, { allowedSort: ["createdAt", "updatedAt", "deadline", "scheduledPublishAt", "name"] as const, defaultSort: "createdAt" });
+    const query = parseListQuery(c, { allowedSort: ["episodeOrder", "createdAt", "updatedAt", "deadline", "scheduledPublishAt", "name"] as const, defaultSort: "episodeOrder" });
+    // Clip lists inside a project read in sheet order (EP, then clip 1, 2, 3…)
+    // unless the caller asks for another sort.
+    if (!c.req.query("sortBy")) query.sortOrder = "asc";
     const data = await service.getProjectClips(id, user, { limit: query.limit, offset: query.offset, sortBy: query.sortBy, sortOrder: query.sortOrder, q: query.q, episodeId: c.req.query("episodeId"), ownerId: c.req.query("ownerId"), status: c.req.query("status")?.split(",") });
 
     if (!data) {
@@ -456,6 +459,9 @@ projects.post(
       const updateResults: any[] = [];
       const newRows: any[] = [];
       const newRowMeta: any[] = [];
+      // Rows inserted by one statement would share now(); give each row its own
+      // timestamp (1ms apart) so clips keep the order they had in the sheet.
+      const insertBaseTime = Date.now();
 
       for (const clipData of clips) {
         const episode = episodeMap.get(clipData.episodeNo);
@@ -516,6 +522,8 @@ projects.post(
             ownerId: finalOwnerId,
             createdBy: isValidUser(clipData.createdBy) ? clipData.createdBy : validUserId,
             status: "DRAFT",
+            createdAt: new Date(insertBaseTime + newRows.length),
+            updatedAt: new Date(insertBaseTime + newRows.length),
           });
           newRowMeta.push({
             isNewlyAssigned: Boolean(finalOwnerId),

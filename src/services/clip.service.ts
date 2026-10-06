@@ -43,7 +43,7 @@ export const ClipService = {
     deadlineTo?: string;
     createdFrom?: string;
     createdTo?: string;
-    sortBy?: "createdAt" | "updatedAt" | "deadline" | "scheduledPublishAt" | "name" | "project";
+    sortBy?: "createdAt" | "updatedAt" | "deadline" | "scheduledPublishAt" | "name" | "project" | "episodeOrder";
     sortOrder?: "asc" | "desc";
     user?: { id: string; role: "USER" | "REVIEWER" | "ADMIN" };
   }) {
@@ -109,7 +109,10 @@ export const ClipService = {
         .leftJoin(clipPublishSchedules, eq(clipPublishSchedules.clipId, clipsSchema.id))
         .leftJoin(revisions, eq(revisions.id, clipsSchema.currentRevisionId))
         .where(whereClause)
-        .orderBy(order(sortColumns[sortBy]), order(clipsSchema.id))
+        .orderBy(...(sortBy === "episodeOrder"
+          // Sheet order: episode, then the order clips were added (stable).
+          ? [order(episodes.episodeNo), order(clipsSchema.createdAt), order(clipsSchema.id)]
+          : [order(sortColumns[sortBy]), order(clipsSchema.id)]))
         .limit(limit ?? 20).offset(offset ?? 0),
       db.select({ count: sql<number>`count(*)` }).from(clipsSchema).where(whereClause),
     ]);
