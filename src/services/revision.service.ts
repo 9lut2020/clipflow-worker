@@ -29,6 +29,11 @@ export const RevisionService = {
           submittedBy: {
             columns: { id: true, displayName: true, pictureUrl: true },
           },
+          // Latest review first: the clip history shows its result and comment.
+          reviews: {
+            orderBy: (review: any, { desc }: any) => [desc(review.createdAt)],
+            with: { reviewer: { columns: { id: true, displayName: true, pictureUrl: true } } },
+          },
         },
         orderBy: [order(sortColumn), order(revisionsSchema.id)],
         limit,
