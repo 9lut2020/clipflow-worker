@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   createDb,
   projects as projectsSchema,
@@ -700,6 +700,47 @@ projects.post(
     }
   },
 );
+
+/**
+ * GET /projects/:id/workload
+ * ADMIN — who can be assigned in this project (members + admins) and how
+ * much open work each person already carries, for balancing assignments.
+ * "Open" = not approved, published or cancelled.
+ */
+projects.get("/:id/workload", adminOnly, async (c: any) => {
+  try {
+    const db = c.get("db");
+    const projectId = c.req.param("id") as string;
+    const result = await db.execute(sql`
+      select u.id, u.display_name, u.picture_url, u.role,
+        count(c.id) filter (where c.status not in ('APPROVED', 'PUBLISHED', 'CANCELLED'))::int open_total,
+        count(c.id) filter (where c.project_id = ${projectId} and c.status not in ('APPROVED', 'PUBLISHED', 'CANCELLED'))::int open_in_project,
+        count(c.id) filter (where c.project_id = ${projectId})::int total_in_project
+      from users u
+      left join clips c on c.owner_id = u.id
+      where u.is_active and (
+        u.role = 'ADMIN' or exists (select 1 from user_projects up where up.user_id = u.id and up.project_id = ${projectId})
+      )
+      group by u.id, u.display_name, u.picture_url, u.role
+      order by u.display_name`);
+    const rows = Array.isArray(result) ? result : result?.rows ?? [];
+    return c.json({
+      status: "success",
+      message: "Workload retrieved",
+      data: rows.map((r: any) => ({
+        id: r.id,
+        displayName: r.display_name,
+        pictureUrl: r.picture_url,
+        role: r.role,
+        openTotal: Number(r.open_total),
+        openInProject: Number(r.open_in_project),
+        totalInProject: Number(r.total_in_project),
+      })),
+    });
+  } catch (error) {
+    return handleApiError(c, error);
+  }
+});
 
 /**
  * GET /projects/:id/members
