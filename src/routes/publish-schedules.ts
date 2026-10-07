@@ -247,6 +247,44 @@ publishSchedulesRouter.delete("/slots/:id", adminOnly, async (c) => {
   return row ? c.json({ status: "success", data: row }) : c.json({ status: "error", message: "Publish slot not found" }, 404);
 });
 
+/**
+ * GET /publish-schedules/posted?from&to[&projectId]
+ * What actually went out, per clip per day (Bangkok time) — includes clips
+ * that were recorded as posted without ever being queued.
+ */
+publishSchedulesRouter.get("/posted", async (c) => {
+  try {
+    const from = c.req.query("from");
+    const to = c.req.query("to");
+    const isDate = (value?: string) => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+    if (!isDate(from) || !isDate(to)) return c.json({ status: "error", code: "VALIDATION_ERROR", message: "from and to (YYYY-MM-DD) are required", data: null, errors: {} }, 400);
+    const projectId = c.req.query("projectId");
+    const db = c.get("db");
+    const localDay = sql`to_char(published_posts.published_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD')`;
+    const rows: any[] = await db.select({
+      clipId: publishedPosts.clipId,
+      date: sql<string>`${localDay}`,
+      time: sql<string>`min(to_char(published_posts.published_at AT TIME ZONE 'Asia/Bangkok', 'HH24:MI'))`,
+      platforms: sql<string[]>`array_agg(DISTINCT published_posts.platform::text)`,
+    }).from(publishedPosts)
+      .innerJoin(clips, eq(clips.id, publishedPosts.clipId))
+      .where(and(
+        gte(publishedPosts.publishedAt, sql`(${from} || 'T00:00:00+07:00')::timestamptz`),
+        sql`${publishedPosts.publishedAt} < ((${to} || 'T00:00:00+07:00')::timestamptz + interval '1 day')`,
+        projectId ? eq(clips.projectId, projectId) : undefined,
+      ))
+      .groupBy(publishedPosts.clipId, localDay)
+      .orderBy(localDay);
+    const clipIds = [...new Set(rows.map((row) => row.clipId))];
+    const clipRows = clipIds.length ? await db.query.clips.findMany({
+      where: (row: any, { inArray: within }: any) => within(row.id, clipIds),
+      with: { project: { columns: { id: true, name: true } }, episode: { columns: { id: true, episodeNo: true, name: true } }, owner: { columns: { id: true, displayName: true, pictureUrl: true } }, publishedPosts: { columns: { id: true, platform: true } }, currentRevision: { columns: { id: true, driveUrl: true, revisionNo: true } } },
+    }) : [];
+    const byId = new Map(clipRows.map((clip: any) => [clip.id, clip]));
+    return c.json({ status: "success", data: rows.map((row) => ({ ...row, projectId: (byId.get(row.clipId) as any)?.projectId, clip: byId.get(row.clipId) || null })) });
+  } catch (error) { return handleApiError(c, error); }
+});
+
 publishSchedulesRouter.get("/queue", async (c) => {
   try {
     const query = parseListQuery(c, { allowedSort: ["publishDate", "publishTime", "createdAt"] as const, defaultSort: "publishDate", defaultLimit: 100 });
