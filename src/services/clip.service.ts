@@ -100,7 +100,7 @@ export const ClipService = {
         scheduleDate: clipPublishSchedules.publishDate, scheduleTime: clipPublishSchedules.publishTime,
         scheduleStatus: clipPublishSchedules.status, scheduleRepeat: clipPublishSchedules.isRepeat, scheduleNote: clipPublishSchedules.note,
         revisionDriveUrl: revisions.driveUrl, revisionNo: revisions.revisionNo,
-        publishedPostCount: sql<number>`(SELECT count(*)::int FROM published_posts pp WHERE pp.clip_id = ${clipsSchema.id})`,
+        postedPlatforms: sql<string[]>`(SELECT coalesce(array_agg(DISTINCT pp.platform::text), '{}') FROM published_posts pp WHERE pp.clip_id = ${clipsSchema.id})`,
       }).from(clipsSchema)
         .innerJoin(projects, eq(clipsSchema.projectId, projects.id))
         .innerJoin(episodes, eq(clipsSchema.episodeId, episodes.id))
@@ -126,7 +126,7 @@ export const ClipService = {
       videoSize: row.videoSizeName ? { id: row.videoSizeId, name: row.videoSizeName, width: row.videoSizeWidth, height: row.videoSizeHeight } : null,
       publishSchedule: row.scheduleId ? { id: row.scheduleId, slotId: row.scheduleSlotId, publishDate: row.scheduleDate, publishTime: row.scheduleTime, status: row.scheduleStatus, isRepeat: row.scheduleRepeat, note: row.scheduleNote } : null,
       currentRevision: row.revisionDriveUrl ? { id: row.currentRevisionId, driveUrl: row.revisionDriveUrl, revisionNo: row.revisionNo } : null,
-      publishedPosts: Array.from({ length: Number(row.publishedPostCount) }, () => ({})),
+      publishedPosts: (row.postedPlatforms || []).map((platform: string) => ({ platform })),
     }));
     return { items, total: Number(countRows[0]?.count || 0) };
   },

@@ -519,6 +519,35 @@ clips.get("/:id/published-posts", adminOnly, async (c: Context) => {
 });
 
 /**
+ * DELETE /clips/:id/published-posts/:platform
+ * Undo a post record (e.g. marked by mistake). Re-opens the queue entry and,
+ * when nothing is posted any more, returns the clip to APPROVED.
+ */
+clips.delete("/:id/published-posts/:platform", adminOnly, async (c: Context) => {
+  const db = c.get("db");
+  const clipId = c.req.param("id") as string;
+  const platform = c.req.param("platform") as string;
+  try {
+    const removed = await db.delete(publishedPosts)
+      .where(and(eq(publishedPosts.clipId, clipId), eq(publishedPosts.platform, platform as any)))
+      .returning({ id: publishedPosts.id });
+    if (removed.length === 0) return c.json({ status: "error", message: "Post record not found", data: null }, 404);
+    const [left] = await db.select({ count: sql<number>`count(*)::int` }).from(publishedPosts).where(eq(publishedPosts.clipId, clipId));
+    await db.update(clipPublishSchedules)
+      .set({ status: "SCHEDULED", updatedAt: new Date() })
+      .where(and(eq(clipPublishSchedules.clipId, clipId), eq(clipPublishSchedules.status, "PUBLISHED")));
+    if (Number(left?.count || 0) === 0) {
+      await db.update(clipsTable)
+        .set({ status: "APPROVED", updatedAt: new Date() })
+        .where(and(eq(clipsTable.id, clipId), eq(clipsTable.status, "PUBLISHED")));
+    }
+    return c.json({ status: "success", message: "Removed post record", data: { removed: removed.length } });
+  } catch (err: any) {
+    return handleApiError(c, err);
+  }
+});
+
+/**
  * POST /clips/:id/publish
  * Record a new published post
  */
