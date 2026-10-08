@@ -7,7 +7,7 @@ const baseUrl = liffId
   ? `https://liff.line.me/${liffId}`
   : process.env.NEXTAUTH_URL ||
     process.env.NEXT_PUBLIC_APP_URL ||
-    "https://clipflow-tmyda.vercel.app";
+    "https://clipflow.fityatulhaq.org";
 
 // ฟังก์ชันนี้จะถูกเรียกใช้โดยปุ่มต่างๆ ใน Flex Card ทั้งหมดด้านล่างครับ
 function getLiffUrl(path?: string) {
@@ -1897,12 +1897,16 @@ export async function notifyReviewerRoleGranted({
   });
 }
 
-const ROLE_INFO: Record<string, { label: string; emoji: string; color: string; duties: string }> = {
+const ROLE_INFO: Record<
+  string,
+  { label: string; emoji: string; color: string; duties: string }
+> = {
   ADMIN: {
     label: "ADMIN (ผู้ดูแลระบบ)",
     emoji: "👑",
     color: "#7C3AED",
-    duties: "จัดการโปรเจกต์ มอบหมายงาน จัดการสมาชิก ตรวจงาน และวางแผนการโพสต์ได้ทั้งหมด",
+    duties:
+      "จัดการโปรเจกต์ มอบหมายงาน จัดการสมาชิก ตรวจงาน และวางแผนการโพสต์ได้ทั้งหมด",
   },
   REVIEWER: {
     label: "REVIEWER (ผู้ตรวจงาน)",
@@ -1950,7 +1954,13 @@ export async function notifyRoleChanged({
       backgroundColor: info.color,
       paddingAll: "lg",
       contents: [
-        { type: "text", text: "🔔 ROLE UPDATED", weight: "bold", color: "#E2E8F0", size: "xs" },
+        {
+          type: "text",
+          text: "🔔 ROLE UPDATED",
+          weight: "bold",
+          color: "#E2E8F0",
+          size: "xs",
+        },
         {
           type: "text",
           text: `${info.emoji} บทบาทของคุณถูกเปลี่ยนแล้ว`,
@@ -1984,27 +1994,69 @@ export async function notifyRoleChanged({
               type: "box",
               layout: "baseline",
               contents: [
-                { type: "text", text: "เดิม", size: "xs", color: "#94A3B8", flex: 2 },
-                { type: "text", text: oldLabel, size: "sm", color: "#64748B", flex: 5, wrap: true },
+                {
+                  type: "text",
+                  text: "เดิม",
+                  size: "xs",
+                  color: "#94A3B8",
+                  flex: 2,
+                },
+                {
+                  type: "text",
+                  text: oldLabel,
+                  size: "sm",
+                  color: "#64748B",
+                  flex: 5,
+                  wrap: true,
+                },
               ],
             },
             {
               type: "box",
               layout: "baseline",
               contents: [
-                { type: "text", text: "ใหม่", size: "xs", color: "#94A3B8", flex: 2 },
-                { type: "text", text: info.label, size: "sm", color: info.color, weight: "bold", flex: 5, wrap: true },
+                {
+                  type: "text",
+                  text: "ใหม่",
+                  size: "xs",
+                  color: "#94A3B8",
+                  flex: 2,
+                },
+                {
+                  type: "text",
+                  text: info.label,
+                  size: "sm",
+                  color: info.color,
+                  weight: "bold",
+                  flex: 5,
+                  wrap: true,
+                },
               ],
             },
             ...(changedBy
-              ? [{
-                  type: "box",
-                  layout: "baseline",
-                  contents: [
-                    { type: "text", text: "โดย", size: "xs", color: "#94A3B8", flex: 2 },
-                    { type: "text", text: changedBy, size: "sm", color: "#64748B", flex: 5, wrap: true },
-                  ],
-                }]
+              ? [
+                  {
+                    type: "box",
+                    layout: "baseline",
+                    contents: [
+                      {
+                        type: "text",
+                        text: "โดย",
+                        size: "xs",
+                        color: "#94A3B8",
+                        flex: 2,
+                      },
+                      {
+                        type: "text",
+                        text: changedBy,
+                        size: "sm",
+                        color: "#64748B",
+                        flex: 5,
+                        wrap: true,
+                      },
+                    ],
+                  },
+                ]
               : []),
           ],
         },
@@ -2028,7 +2080,11 @@ export async function notifyRoleChanged({
           style: "primary",
           color: info.color,
           height: "sm",
-          action: { type: "uri", label: "เปิด ClipFlow 🌐", uri: getLiffUrl("/dashboard") },
+          action: {
+            type: "uri",
+            label: "เปิด ClipFlow 🌐",
+            uri: getLiffUrl("/dashboard"),
+          },
         },
       ],
     },

@@ -9,5 +9,5 @@ export function getFrontendUrl(env: any): string {
     .split(",")
     .map((value) => value.trim())
     .find(Boolean);
-  return (firstOrigin || "https://clipflow-tmyda.vercel.app").replace(/\/$/, "");
+  return (firstOrigin || "https://clipflow.fityatulhaq.org").replace(/\/$/, "");
 }

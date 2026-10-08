@@ -56,7 +56,7 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // ─── Global Middleware ─────────────────────────────────────────────────────
 app.use("*", async (c: any, next: any) => {
-  const configured = String(c.env?.CORS_ORIGINS || "https://clipflow-tmyda.vercel.app").split(",").map((value) => value.trim()).filter(Boolean);
+  const configured = String(c.env?.CORS_ORIGINS || "https://clipflow.fityatulhaq.org").split(",").map((value) => value.trim()).filter(Boolean);
   const middleware = cors({
     origin: (origin) => {
       if (!origin) return configured[0] || "";

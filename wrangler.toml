@@ -14,7 +14,7 @@ mode = "smart"
 ENVIRONMENT = "production"
 DB_DRIVER = "neon-http"
 # Public frontend URL used in LINE/in-app notification links
-FRONTEND_URL = "https://clipflow-tmyda.vercel.app"
+FRONTEND_URL = "https://clipflow.fityatulhaq.org"
 
 # ---- Database acceleration ----
 # Opt-in: set DB_DRIVER = "hyperdrive" under [vars] to route API traffic through
