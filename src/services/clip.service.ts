@@ -36,7 +36,7 @@ export const ClipService = {
     videoSizeId?: string;
     q?: string;
     scheduledState?: "scheduled" | "unscheduled" | "overdue";
-    postingState?: "unposted" | "partial" | "completed";
+    postingState?: "unposted" | "partial" | "completed" | "incomplete";
     scheduledFrom?: string;
     scheduledTo?: string;
     deadlineFrom?: string;
@@ -67,6 +67,8 @@ export const ClipService = {
     if (postingState === "unposted") conditions.push(sql`(SELECT count(*) FROM published_posts pp WHERE pp.clip_id = ${clipsSchema.id}) = 0`);
     if (postingState === "partial") conditions.push(sql`(SELECT count(DISTINCT pp.platform) FROM published_posts pp WHERE pp.clip_id = ${clipsSchema.id}) BETWEEN 1 AND 3`);
     if (postingState === "completed") conditions.push(sql`(SELECT count(DISTINCT pp.platform) FROM published_posts pp WHERE pp.clip_id = ${clipsSchema.id}) >= 4`);
+    // Not on every platform yet — the publish page's "รอโพสต์" list.
+    if (postingState === "incomplete") conditions.push(sql`(SELECT count(DISTINCT pp.platform) FROM published_posts pp WHERE pp.clip_id = ${clipsSchema.id}) < 4`);
     if (user?.role === "USER") conditions.push(eq(clipsSchema.ownerId, user.id));
     if (user?.role === "REVIEWER") conditions.push(notInArray(clipsSchema.status, ["DRAFT", "CANCELLED"]));
 

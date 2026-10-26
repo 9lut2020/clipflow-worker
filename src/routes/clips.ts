@@ -68,7 +68,7 @@ clips.get("/stats", async (c: Context) => {
     const trendStart = sql`date_trunc('day', now() AT TIME ZONE 'Asia/Bangkok') - make_interval(days => ${trendDays - 1})`;
 
     const [statusRows, submittedRows, approvedRows, creatorRows] = await Promise.all([
-      db.select({ status: clipsTable.status, count: sql<number>`count(*)::int` })
+      db.select({ status: clipsTable.status, count: sql<number>`count(*)::int`, unassigned: sql<number>`count(*) filter (where ${clipsTable.ownerId} is null)::int` })
         .from(clipsTable).where(where).groupBy(clipsTable.status),
       db.select({ day: bangkokDay(clipsTable.createdAt), count: sql<number>`count(*)::int` })
         .from(clipsTable)
@@ -94,6 +94,8 @@ clips.get("/stats", async (c: Context) => {
     ]);
 
     const byStatus = Object.fromEntries(statusRows.map((row: any) => [row.status, Number(row.count)]));
+    // Drafts nobody has been given yet ("รอมอบหมาย"), counted inside byStatus.DRAFT.
+    const unassigned = Number(statusRows.find((row: any) => row.status === "DRAFT")?.unassigned || 0);
     const total = statusRows.reduce((sum: number, row: any) => sum + Number(row.count), 0);
     const submittedByDay = new Map<string, number>(submittedRows.map((row: any) => [String(row.day), Number(row.count)]));
     const approvedByDay = new Map<string, number>(approvedRows.map((row: any) => [String(row.day), Number(row.count)]));
@@ -108,7 +110,7 @@ clips.get("/stats", async (c: Context) => {
     return c.json({
       status: "success",
       message: "Clip stats retrieved successfully",
-      data: { byStatus, total, trend, creators: creatorRows },
+      data: { byStatus, unassigned, total, trend, creators: creatorRows },
     });
   } catch (error) {
     return handleApiError(c, error);

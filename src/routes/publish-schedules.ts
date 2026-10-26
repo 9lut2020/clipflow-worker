@@ -161,6 +161,8 @@ publishSchedulesRouter.get("/summary", async (c) => {
     overdue: sql<number>`count(*) filter (where ${clips.scheduledPublishAt} < now() and ${posted} = 0)`,
     partial: sql<number>`count(*) filter (where ${posted} between 1 and 3)`,
     completed: sql<number>`count(*) filter (where ${posted} >= 4)`,
+    pending: sql<number>`count(*) filter (where ${posted} < 4)`,
+    total: sql<number>`count(*)`,
   }).from(clips).leftJoin(postCounts, eq(postCounts.clipId, clips.id)).where(inArray(clips.status, ["APPROVED", "PUBLISHED"]));
   return c.json({ status: "success", message: "Publish summary retrieved successfully", data: Object.fromEntries(Object.entries(row).map(([key, value]) => [key, Number(value)])) });
 });
@@ -174,7 +176,7 @@ publishSchedulesRouter.get("/items", async (c) => {
     const result = await ClipService.listClips({
       db: c.get("db"), q: query.q, projectId: c.req.query("projectId"), ownerId: c.req.query("ownerId"), status: ["APPROVED", "PUBLISHED"],
       scheduledState: scheduleState === "scheduled" || scheduleState === "unscheduled" || scheduleState === "overdue" ? scheduleState : undefined,
-      postingState: postingState === "unposted" || postingState === "partial" || postingState === "completed" ? postingState : undefined,
+      postingState: postingState === "unposted" || postingState === "partial" || postingState === "completed" || postingState === "incomplete" ? postingState : undefined,
       scheduledFrom: c.req.query("from"), scheduledTo: c.req.query("to"), limit: query.limit, offset: query.offset,
       sortBy: query.sortBy === "scheduledAt" ? "scheduledPublishAt" : query.sortBy, sortOrder: query.sortOrder,
     });
