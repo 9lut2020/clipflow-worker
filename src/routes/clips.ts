@@ -670,57 +670,66 @@ clips.delete("/:id/published-posts/:platform", adminOnly, async (c: Context) => 
 clips.post("/:id/publish", adminOnly, async (c: Context) => {
   const db = c.get("db");
   const clipId = c.req.param("id") as string;
+  const PLATFORMS = ["TIKTOK", "YOUTUBE_SHORTS", "FACEBOOK_REELS", "INSTAGRAM_REELS"];
 
   try {
-    const body = await c.req.json();
+    const body = await c.req.json().catch(() => ({}));
     const { platform, caption, url, publishedAt, publishedBy } = body;
 
     const userId = c.get("user")?.id || publishedBy;
     if (!userId) {
       return c.json({ status: "error", message: "User ID required", data: null }, 401);
     }
+    if (!PLATFORMS.includes(platform)) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Unknown platform");
+    }
+    const postedAt = publishedAt ? new Date(publishedAt) : new Date();
+    if (Number.isNaN(postedAt.getTime())) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid publishedAt");
+    }
 
-    // 1. Insert published post record
-    const result = await db.insert(publishedPosts).values({
+    const clip = await db.query.clips.findFirst({
+      where: (row: any, { eq: equal }: any) => equal(row.id, clipId),
+      columns: { id: true, status: true },
+    });
+    if (!clip) return apiError(c, 404, "NOT_FOUND", "Clip not found");
+    if (clip.status !== "APPROVED" && clip.status !== "PUBLISHED") {
+      return apiError(c, 409, "NOT_PUBLISHABLE", "บันทึกการโพสต์ได้เฉพาะคลิปที่ผ่านการตรวจแล้ว");
+    }
+
+    // One record per platform. Saving a platform again (double tap, two
+    // tabs, "all platforms" racing a single tap) is not an error: keep the
+    // first record and only fill in a post link it did not have yet.
+    const [record] = await db.insert(publishedPosts).values({
       clipId,
       platform,
       caption,
-      url,
-      publishedAt: publishedAt ? new Date(publishedAt) : new Date(),
+      url: url || null,
+      publishedAt: postedAt,
       publishedBy: userId,
+    }).onConflictDoUpdate({
+      target: [publishedPosts.clipId, publishedPosts.platform],
+      set: { url: sql`coalesce(${publishedPosts.url}, excluded.url)` },
     }).returning();
 
-    // 2. Update clip status to PUBLISHED
-    await db.update(clipsTable)
-      .set({ status: "PUBLISHED", updatedAt: new Date() })
-      .where(eq(clipsTable.id, clipId));
-
-    const platformRows = await db
-      .select({ platform: publishedPosts.platform })
+    const [{ count: postedCount }] = await db
+      .select({ count: sql<number>`count(distinct ${publishedPosts.platform})::int` })
       .from(publishedPosts)
       .where(eq(publishedPosts.clipId, clipId));
-    const requiredPlatforms = new Set([
-      "TIKTOK",
-      "YOUTUBE_SHORTS",
-      "FACEBOOK_REELS",
-      "INSTAGRAM_REELS",
-    ]);
-    const publishedPlatforms = new Set(
-      platformRows.map((post: { platform: string }) => post.platform),
-    );
-    const isFullyPublished = Array.from(requiredPlatforms).every((platform) =>
-      publishedPlatforms.has(platform),
-    );
-    if (isFullyPublished) {
-      await db
-        .update(clipPublishSchedules)
-        .set({ status: "PUBLISHED", updatedAt: new Date() })
-        .where(eq(clipPublishSchedules.clipId, clipId));
-    }
 
-    return c.json({ status: "success", message: "Recorded published post", data: result[0] }, 201);
+    await runBatch(db, (q) => [
+      q.update(clipsTable)
+        .set({ status: "PUBLISHED", updatedAt: new Date() })
+        .where(eq(clipsTable.id, clipId)),
+      ...(Number(postedCount) >= PLATFORMS.length
+        ? [q.update(clipPublishSchedules)
+            .set({ status: "PUBLISHED", updatedAt: new Date() })
+            .where(eq(clipPublishSchedules.clipId, clipId))]
+        : []),
+    ]);
+
+    return c.json({ status: "success", message: "Recorded published post", data: record }, 201);
   } catch (err: any) {
-    console.error("Failed to record publish:", err);
-    return c.json({ status: "error", message: err.message || "Failed to record publish", data: null }, 500);
+    return handleApiError(c, err);
   }
 });
