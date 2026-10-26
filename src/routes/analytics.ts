@@ -108,7 +108,7 @@ analyticsRouter.get("/overview", async (c: Context) => {
           (select round(avg(revision_no)::numeric, 2) from appr) avg_revisions,
           (select round((avg(extract(epoch from (a.created_at - f.first_at))) / 3600)::numeric, 1) from appr a join first_sub f on f.clip_id = a.clip_id) avg_turnaround_hours,
           (select round((avg(extract(epoch from (created_at - submitted_at))) / 3600)::numeric, 1) from revs) avg_review_hours`),
-      db.execute(sql`with ${sc} select status, count(*)::int n from sc group by status`),
+      db.execute(sql`with ${sc} select case when status = 'DRAFT' and owner_id is null then 'UNASSIGNED' else status::text end status, count(*)::int n from sc group by 1`),
       db.execute(sql`with ${sc}
         select to_char(b, 'YYYY-MM-DD') bucket, sum(s)::int submitted, sum(a)::int approved from (
           select date_trunc(${bucket}, r.submitted_at at time zone 'Asia/Bangkok') b, 1 s, 0 a
@@ -120,9 +120,12 @@ analyticsRouter.get("/overview", async (c: Context) => {
       db.execute(sql`with ${sc}
         select p.id, p.name, count(*)::int total,
           count(*) filter (where sc.status in ('APPROVED', 'PUBLISHED'))::int done,
+          count(*) filter (where sc.status = 'PUBLISHED')::int published,
+          count(*) filter (where sc.status = 'APPROVED')::int ready,
           count(*) filter (where sc.status in ('PENDING_REVIEW', 'IN_REVIEW', 'RESUBMITTED'))::int in_review,
           count(*) filter (where sc.status = 'NEEDS_REVISION')::int needs_revision,
-          count(*) filter (where sc.status = 'DRAFT')::int not_started
+          count(*) filter (where sc.status = 'DRAFT' and sc.owner_id is not null)::int not_started,
+          count(*) filter (where sc.status = 'DRAFT' and sc.owner_id is null)::int unassigned
         from sc join projects p on p.id = sc.project_id
         where p.is_active group by p.id, p.name order by total desc, p.name limit 8`),
       user.role === "USER"
@@ -198,6 +201,7 @@ analyticsRouter.get("/overview", async (c: Context) => {
         projects: rows(projectRes).map((r: any) => ({
           id: r.id, name: r.name, total: Number(r.total), done: Number(r.done),
           inReview: Number(r.in_review), needsRevision: Number(r.needs_revision), notStarted: Number(r.not_started),
+          published: Number(r.published), ready: Number(r.ready), unassigned: Number(r.unassigned),
         })),
         editors: rows(editorRes).map((r: any) => ({
           id: r.id, name: r.name, pictureUrl: r.picture_url, assigned: Number(r.assigned), submissions: Number(r.submissions),

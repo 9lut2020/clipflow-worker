@@ -7,9 +7,10 @@ import { ClipSubmitRevisionSchema, ClipScheduleSchema, ClipFastSubmitSchema } fr
 import { logActivity } from "../services/activity-logger";
 // Static imports — avoids re-loading on every request
 import { and, asc, desc, eq, gte, inArray, lte, notInArray, sql } from "drizzle-orm";
-import { clips as clipsTable, clipPublishSchedules, publishedPosts, users } from "@clipflow/db";
+import { clips as clipsTable, clipPublishSchedules, publishedPosts, runBatch, users } from "@clipflow/db";
 import { apiError, handleApiError, paginated, parseDate, parseListQuery, parseMultiValue } from "../lib/api-contract";
 import { adminOnly } from "../middleware/role";
+import { NotificationService } from "../services/notifications/notification.service";
 
 export const clips = new Hono<{
   Bindings: { DATABASE_URL: string };
@@ -432,6 +433,119 @@ clips.post("/:id/revisions", zValidator("json", ClipSubmitRevisionSchema), async
       },
       500,
     );
+  }
+});
+
+/**
+ * PATCH /clips/:id/owner  { ownerId }
+ * ADMIN — assign a clip that is still waiting to be handed out ("รอมอบหมาย")
+ * straight from the clip page. Same rules as the assignment sheet: only
+ * drafts, only active project members (or admins); the assignee gets the
+ * usual TASK_ASSIGNED notification.
+ */
+clips.patch("/:id/owner", adminOnly, async (c: Context) => {
+  const db = c.get("db");
+  const id = c.req.param("id") as string;
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const ownerId = typeof body.ownerId === "string" ? body.ownerId : "";
+    if (!ownerId) return apiError(c, 400, "VALIDATION_ERROR", "ownerId is required");
+    const clip = await db.query.clips.findFirst({
+      where: (row: any, { eq: equal }: any) => equal(row.id, id),
+      columns: { id: true, name: true, status: true, projectId: true, description: true, deadline: true, ownerId: true },
+      with: { project: { columns: { id: true, name: true } } },
+    });
+    if (!clip) return apiError(c, 404, "NOT_FOUND", "Clip not found");
+    if (clip.status !== "DRAFT") return apiError(c, 409, "LOCKED", "ส่งงานแล้ว เปลี่ยนผู้รับผิดชอบไม่ได้");
+    const [owner, membership] = await Promise.all([
+      db.query.users.findFirst({ where: (row: any, { eq: equal }: any) => equal(row.id, ownerId), columns: { id: true, displayName: true, lineUserId: true, role: true, isActive: true } }),
+      db.query.userProjects.findFirst({ where: (row: any, { and: all, eq: equal }: any) => all(equal(row.userId, ownerId), equal(row.projectId, clip.projectId)), columns: { userId: true } }),
+    ]);
+    if (!owner || owner.isActive === false || (!membership && owner.role !== "ADMIN")) {
+      return apiError(c, 400, "VALIDATION_ERROR", "ผู้รับผิดชอบต้องเป็นสมาชิกของโปรเจกต์");
+    }
+    const [updated] = await db.update(clipsTable).set({ ownerId, updatedAt: new Date() }).where(eq(clipsTable.id, id)).returning({ id: clipsTable.id, ownerId: clipsTable.ownerId, status: clipsTable.status });
+
+    if (clip.ownerId !== ownerId) {
+      const notify = NotificationService.dispatch({
+        type: "TASK_ASSIGNED",
+        payload: {
+          assigneeId: ownerId,
+          projectId: clip.projectId,
+          toLineUserId: owner.lineUserId || undefined,
+          displayName: owner.displayName,
+          assignerName: c.get("user")?.name || "ผู้ดูแลระบบ",
+          channelAccessToken: (c.env as any)?.LINE_CHANNEL_ACCESS_TOKEN,
+          clipId: id,
+          clipName: clip.name,
+          projectName: clip.project?.name,
+          description: clip.description,
+          deadline: clip.deadline,
+        },
+      } as any, db, c.env).catch(() => {});
+      if (c.executionCtx?.waitUntil) c.executionCtx.waitUntil(notify);
+      await logActivity({
+        db,
+        actorId: c.get("user")?.id || null,
+        action: "TASK_ASSIGNED",
+        entityType: "clip",
+        entityId: id,
+        meta: { clipName: clip.name, projectName: clip.project?.name, targetName: owner.displayName, userId: ownerId },
+      }).catch(() => {});
+    }
+    return c.json({ status: "success", message: "Clip assigned", data: { ...updated, owner: { id: owner.id, displayName: owner.displayName } } });
+  } catch (error) {
+    return handleApiError(c, error);
+  }
+});
+
+/**
+ * POST /clips/:id/cancel  ·  POST /clips/:id/restore
+ * ADMIN — cancel a clip (kept for history, hidden from work lists, removed
+ * from the publish queue) or bring it back. Restore works out the status
+ * from what actually happened: posts → PUBLISHED, latest review → APPROVED /
+ * NEEDS_REVISION, a submitted revision → PENDING_REVIEW, otherwise DRAFT.
+ */
+clips.post("/:id/cancel", adminOnly, async (c: Context) => {
+  const db = c.get("db");
+  const id = c.req.param("id") as string;
+  try {
+    const clip = await db.query.clips.findFirst({ where: (row: any, { eq: equal }: any) => equal(row.id, id), columns: { id: true, status: true } });
+    if (!clip) return apiError(c, 404, "NOT_FOUND", "Clip not found");
+    if (clip.status === "CANCELLED") return c.json({ status: "success", message: "Already cancelled", data: clip });
+    const [, , updated] = await runBatch(db, (q) => [
+      q.delete(clipPublishSchedules).where(eq(clipPublishSchedules.clipId, id)),
+      q.update(clipsTable).set({ scheduledPublishAt: null }).where(eq(clipsTable.id, id)),
+      q.update(clipsTable).set({ status: "CANCELLED", updatedAt: new Date() }).where(eq(clipsTable.id, id)).returning({ id: clipsTable.id, status: clipsTable.status }),
+    ]);
+    return c.json({ status: "success", message: "Clip cancelled", data: (updated as any[])[0] });
+  } catch (error) {
+    return handleApiError(c, error);
+  }
+});
+
+clips.post("/:id/restore", adminOnly, async (c: Context) => {
+  const db = c.get("db");
+  const id = c.req.param("id") as string;
+  try {
+    const clip = await db.query.clips.findFirst({
+      where: (row: any, { eq: equal }: any) => equal(row.id, id),
+      columns: { id: true, status: true, currentRevisionId: true },
+      with: { currentRevision: { columns: { id: true }, with: { reviews: { columns: { status: true, createdAt: true }, orderBy: (r: any, { desc: d }: any) => [d(r.createdAt)], limit: 1 } } } },
+    });
+    if (!clip) return apiError(c, 404, "NOT_FOUND", "Clip not found");
+    if (clip.status !== "CANCELLED") return c.json({ status: "success", message: "Clip is not cancelled", data: { id, status: clip.status } });
+    const [posts] = await db.select({ count: sql<number>`count(*)::int` }).from(publishedPosts).where(eq(publishedPosts.clipId, id));
+    const lastReview = clip.currentRevision?.reviews?.[0]?.status;
+    const status = Number(posts?.count || 0) > 0 ? "PUBLISHED"
+      : lastReview === "APPROVED" ? "APPROVED"
+      : lastReview === "NEEDS_REVISION" ? "NEEDS_REVISION"
+      : clip.currentRevisionId ? "PENDING_REVIEW"
+      : "DRAFT";
+    const [updated] = await db.update(clipsTable).set({ status, updatedAt: new Date() }).where(eq(clipsTable.id, id)).returning({ id: clipsTable.id, status: clipsTable.status });
+    return c.json({ status: "success", message: "Clip restored", data: updated });
+  } catch (error) {
+    return handleApiError(c, error);
   }
 });
 

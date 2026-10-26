@@ -368,7 +368,7 @@ projects.post(
           db.query.clips.findMany({
             where: (cRow: any, { eq: eqOp }: any) =>
               eqOp(cRow.projectId, projectId),
-            columns: { id: true, ownerId: true, deadline: true },
+            columns: { id: true, ownerId: true, deadline: true, status: true, name: true, description: true, episodeId: true, videoSizeId: true },
           }),
           db.query.userProjects.findMany({
             where: (row: any, { eq: eqOp }: any) => eqOp(row.projectId, projectId),
@@ -472,6 +472,12 @@ projects.post(
           const existingClip = clipMap.get(clipData.id);
           // Never touch clips that belong to another project.
           if (!existingClip) continue;
+          // Passed, published and cancelled clips are frozen; once submitted
+          // the editor can no longer be swapped (the review history is theirs).
+          const lock = ["APPROVED", "PUBLISHED", "CANCELLED"].includes(existingClip.status)
+            ? "all"
+            : existingClip.status !== "DRAFT" ? "owner" : "none";
+          if (lock === "all") continue;
 
           const updateData: any = {
             name: clipData.name,
@@ -484,7 +490,9 @@ projects.post(
           if (deadline !== undefined) updateData.deadline = deadline;
 
           let isNewlyAssigned = false;
-          if (clipData.ownerId === "" || clipData.ownerId === null) {
+          if (lock === "owner") {
+            // keep the current editor
+          } else if (clipData.ownerId === "" || clipData.ownerId === null) {
             updateData.ownerId = null;
           } else if (clipData.ownerId && clipData.ownerId !== existingClip.ownerId) {
             if (!canOwn(clipData.ownerId)) {
