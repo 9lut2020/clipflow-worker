@@ -52,7 +52,9 @@ export const ClipService = {
     if (episodeId) conditions.push(eq(clipsSchema.episodeId, episodeId));
     if (projectId) conditions.push(eq(clipsSchema.projectId, projectId));
     if (videoSizeId) conditions.push(eq(clipsSchema.videoSizeId, videoSizeId));
-    if (ownerId) conditions.push(eq(clipsSchema.ownerId, ownerId));
+    // ownerId=none lists clips nobody has been given yet ("รอมอบหมาย").
+    if (ownerId === "none") conditions.push(isNull(clipsSchema.ownerId));
+    else if (ownerId) conditions.push(eq(clipsSchema.ownerId, ownerId));
     if (status) conditions.push(Array.isArray(status) ? inArray(clipsSchema.status, status as any) : eq(clipsSchema.status, status as any));
     if (q) conditions.push(or(ilike(clipsSchema.name, `%${q}%`), ilike(clipsSchema.description, `%${q}%`)));
     if (scheduledState === "scheduled") conditions.push(isNotNull(clipsSchema.scheduledPublishAt));
