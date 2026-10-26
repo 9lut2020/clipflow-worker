@@ -6,7 +6,7 @@ import { zValidator } from "@hono/zod-validator";
 import { ClipSubmitRevisionSchema, ClipScheduleSchema, ClipFastSubmitSchema } from "@clipflow/validations";
 import { logActivity } from "../services/activity-logger";
 // Static imports — avoids re-loading on every request
-import { and, asc, desc, eq, gte, lte, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, notInArray, sql } from "drizzle-orm";
 import { clips as clipsTable, clipPublishSchedules, publishedPosts, users } from "@clipflow/db";
 import { apiError, handleApiError, paginated, parseDate, parseListQuery, parseMultiValue } from "../lib/api-contract";
 import { adminOnly } from "../middleware/role";
@@ -76,20 +76,20 @@ clips.get("/stats", async (c: Context) => {
         .groupBy(sql`1`),
       db.select({ day: bangkokDay(clipsTable.updatedAt), count: sql<number>`count(*)::int` })
         .from(clipsTable)
-        .where(and(...scope, eq(clipsTable.status, "APPROVED"), sql`(${clipsTable.updatedAt} AT TIME ZONE 'Asia/Bangkok') >= ${trendStart}`))
+        .where(and(...scope, inArray(clipsTable.status, ["APPROVED", "PUBLISHED"]), sql`(${clipsTable.updatedAt} AT TIME ZONE 'Asia/Bangkok') >= ${trendStart}`))
         .groupBy(sql`1`),
       db.select({
         id: users.id,
         name: users.displayName,
         pictureUrl: users.pictureUrl,
         total: sql<number>`count(*)::int`,
-        approved: sql<number>`count(*) filter (where ${clipsTable.status} = 'APPROVED')::int`,
+        approved: sql<number>`count(*) filter (where ${clipsTable.status} in ('APPROVED', 'PUBLISHED'))::int`,
       })
         .from(clipsTable)
         .innerJoin(users, eq(users.id, clipsTable.ownerId))
         .where(where)
         .groupBy(users.id, users.displayName, users.pictureUrl)
-        .orderBy(desc(sql`count(*) filter (where ${clipsTable.status} = 'APPROVED')`))
+        .orderBy(desc(sql`count(*) filter (where ${clipsTable.status} in ('APPROVED', 'PUBLISHED'))`))
         .limit(10),
     ]);
 

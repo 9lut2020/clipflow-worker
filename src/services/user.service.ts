@@ -168,8 +168,8 @@ export class UserService {
 
     return {
       totalClips,
-      approvedClips: byStatus.get("APPROVED") || 0,
-      pendingClips: byStatus.get("PENDING_REVIEW") || 0,
+      approvedClips: (byStatus.get("APPROVED") || 0) + (byStatus.get("PUBLISHED") || 0),
+      pendingClips: (byStatus.get("PENDING_REVIEW") || 0) + (byStatus.get("IN_REVIEW") || 0) + (byStatus.get("RESUBMITTED") || 0),
       revisionClips: byStatus.get("NEEDS_REVISION") || 0,
     };
   }
