@@ -144,6 +144,9 @@ export const projects = pgTable("projects", {
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
   pictureUrl: varchar("picture_url", { length: 1024 }),
+  // Extra columns the admin adds to this project's assignment sheet:
+  // [{ key, label, type: "text" | "link" | "select", options? }]
+  customColumns: jsonb("custom_columns").default([]).notNull(),
   isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
@@ -161,6 +164,8 @@ export const episodes = pgTable("episodes", {
   episodeNo: integer("episode_no").notNull(),
   name: varchar("name", { length: 255 }),
   description: text("description"),
+  // Raw footage for this episode; every clip in it can be cut from here.
+  sourceUrl: text("source_url"),
   isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
@@ -180,6 +185,9 @@ export const userProjects = pgTable("user_projects", {
   projectId: uuid("project_id")
     .references(() => projects.id, { onDelete: "cascade" })
     .notNull(),
+  // Role inside this project: EDITOR gets assignments, REVIEWER gets the
+  // "waiting for review" alerts for this project's work.
+  role: varchar("role", { length: 20 }).default("EDITOR").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -209,6 +217,14 @@ export const clips = pgTable("clips", {
     .notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
+  // CLIP (video) or POSTER (image: name = หัวข้อ, question = คำถาม,
+  // description = รายละเอียด).
+  kind: varchar("kind", { length: 20 }).default("CLIP").notNull(),
+  question: text("question"),
+  // Footage for this clip; falls back to the episode's sourceUrl.
+  sourceUrl: text("source_url"),
+  // Values for the project's customColumns, keyed by column key.
+  customFields: jsonb("custom_fields").default({}).notNull(),
   ownerId: uuid("owner_id")
     .references(() => users.id),
   createdBy: uuid("created_by")

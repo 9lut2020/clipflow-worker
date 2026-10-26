@@ -124,6 +124,7 @@ projects.patch(
       description: body.description,
       pictureUrl: body.pictureUrl,
       isActive: body.isActive,
+      customColumns: body.customColumns,
     });
 
     if (!updated) {
@@ -282,6 +283,7 @@ projects.get("/:id/clips", async (c: any) => {
 const CreateEpisodeSchema = z.object({
   episodeNo: z.number().int().positive(),
   name: z.string().optional(),
+  sourceUrl: z.string().optional().nullable(),
 });
 
 projects.post(
@@ -291,7 +293,7 @@ projects.post(
   async (c: any) => {
     const db = c.get("db");
     const projectId = c.req.param("id") as string;
-    const { episodeNo, name } = c.req.valid("json");
+    const { episodeNo, name, sourceUrl } = c.req.valid("json");
 
     try {
       const { episodes } = await import("@clipflow/db");
@@ -302,6 +304,7 @@ projects.post(
           projectId,
           episodeNo,
           name: name || null,
+          sourceUrl: sourceUrl?.trim() || null,
         })
         .returning();
 
@@ -485,6 +488,10 @@ projects.post(
             episodeId: episode.id,
             platform: clipData.platform || "TIKTOK",
             videoSizeId: clipData.videoSizeId || null,
+            ...(clipData.kind && { kind: clipData.kind }),
+            ...(clipData.question !== undefined && { question: clipData.question || null }),
+            ...(clipData.sourceUrl !== undefined && { sourceUrl: clipData.sourceUrl?.trim() || null }),
+            ...(clipData.customFields && { customFields: clipData.customFields }),
             updatedAt: new Date(),
           };
           if (deadline !== undefined) updateData.deadline = deadline;
@@ -526,6 +533,10 @@ projects.post(
             description: clipData.description || null,
             platform: clipData.platform || "TIKTOK",
             videoSizeId: clipData.videoSizeId || null,
+            kind: clipData.kind || "CLIP",
+            question: clipData.question || null,
+            sourceUrl: clipData.sourceUrl?.trim() || null,
+            customFields: clipData.customFields || {},
             deadline: deadline ?? null,
             ownerId: finalOwnerId,
             createdBy: isValidUser(clipData.createdBy) ? clipData.createdBy : validUserId,
@@ -856,6 +867,29 @@ projects.post(
  * DELETE /projects/:id/members/:userId
  * Remove a member from a project
  */
+/**
+ * PATCH /projects/:id/members/:userId  { role: "EDITOR" | "REVIEWER" }
+ * ADMIN — a member's job in this project. Editors are the people work is
+ * assigned to; reviewers get this project's "waiting for review" alerts.
+ */
+projects.patch("/:id/members/:userId", adminOnly, async (c: any) => {
+  const db = c.get("db");
+  const projectId = c.req.param("id") as string;
+  const userId = c.req.param("userId") as string;
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const role = body.role === "REVIEWER" ? "REVIEWER" : body.role === "EDITOR" ? "EDITOR" : null;
+    if (!role) return c.json({ status: "error", code: "VALIDATION_ERROR", message: "role must be EDITOR or REVIEWER", data: null }, 400);
+    const [updated] = await db.update(userProjectsSchema).set({ role })
+      .where(and(eq(userProjectsSchema.projectId, projectId), eq(userProjectsSchema.userId, userId)))
+      .returning();
+    if (!updated) return c.json({ status: "error", code: "NOT_FOUND", message: "Member not found", data: null }, 404);
+    return c.json({ status: "success", message: "Member role updated", data: updated });
+  } catch (error) {
+    return handleApiError(c, error);
+  }
+});
+
 projects.delete("/:id/members/:userId", adminOnly, async (c: any) => {
   const db = c.get("db");
   const projectId = c.req.param("id");

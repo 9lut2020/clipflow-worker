@@ -68,7 +68,7 @@ episodes.get("/:id", async (c) => {
 episodes.post("/", adminOnly, async (c: any) => {
   const db = c.get("db")
   const body = await c.req.json()
-  const { projectId, episodeNo, name } = body
+  const { projectId, episodeNo, name, sourceUrl } = body
   const actorId = c.get("user")?.id || null
 
   if (!projectId || !episodeNo) {
@@ -80,7 +80,7 @@ episodes.post("/", adminOnly, async (c: any) => {
 
   const [newEpisode] = await db
     .insert(episodesSchema)
-    .values({ projectId, episodeNo: Number(episodeNo), name: name || null })
+    .values({ projectId, episodeNo: Number(episodeNo), name: name || null, sourceUrl: sourceUrl?.trim() || null })
     .returning()
 
   await logActivity({
@@ -110,6 +110,7 @@ episodes.patch("/:id", adminOnly, async (c: any) => {
     .set({
       ...(body.name !== undefined && { name: body.name }),
       ...(body.episodeNo !== undefined && { episodeNo: Number(body.episodeNo) }),
+      ...(body.sourceUrl !== undefined && { sourceUrl: typeof body.sourceUrl === "string" && body.sourceUrl.trim() ? body.sourceUrl.trim() : null }),
     })
     .where(eq(episodesSchema.id, id))
     .returning()

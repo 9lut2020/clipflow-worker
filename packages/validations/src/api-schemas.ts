@@ -41,6 +41,11 @@ export const ClipBatchCreateSchema = z.object({
       videoSizeId: z.string().uuid().optional().nullable().or(z.literal("")),
       createdBy: z.string().optional(),
       deadline: z.string().optional().nullable(),
+      // CLIP (video) or POSTER (name = หัวข้อ, question = คำถาม, description = รายละเอียด)
+      kind: z.enum(["CLIP", "POSTER"]).optional(),
+      question: z.string().optional().nullable(),
+      sourceUrl: z.string().optional().nullable(),
+      customFields: z.record(z.string(), z.string()).optional(),
     })
   ).min(1, "At least one clip is required"),
 });
@@ -56,6 +61,13 @@ export const ProjectUpdateSchema = z.object({
   description: z.string().optional().nullable(),
   pictureUrl: z.string().url("Must be a valid URL").optional().or(z.literal("")).nullable(),
   isActive: z.boolean().optional(),
+  // Extra columns on this project's assignment sheet.
+  customColumns: z.array(z.object({
+      key: z.string().regex(/^[a-z0-9_]{1,40}$/),
+      label: z.string().trim().min(1).max(60),
+      type: z.enum(["text", "link", "select"]),
+      options: z.array(z.string().trim().min(1).max(60)).max(30).optional(),
+    })).max(20).optional(),
 });
 
 export const UserSyncSchema = z.object({

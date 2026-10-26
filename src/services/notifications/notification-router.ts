@@ -1,6 +1,7 @@
 import { LinePersonalService } from "./line/line-personal.service";
 import { LineGroupService } from "./line/line-group.service";
-import { createDb, notifications } from "@clipflow/db";
+import { createDb, notifications, userProjects, users } from "@clipflow/db";
+import { and, eq } from "drizzle-orm";
 import { WebPushService } from "./web-push.service";
 import { notifyReviewerRoleGranted, notifyRoleChanged } from "./line/flex-templates";
 
@@ -124,7 +125,23 @@ export const NotificationRouter = {
         await LineGroupService.sendPendingReview(event.payload).catch((err) =>
           console.error("[NOTIFICATION ROUTER] Pending Review Group Failed", err)
         );
-        await WebPushService.sendToRoles({ db, roles: ["REVIEWER", "ADMIN"], message: { title: "มีคลิปรอตรวจ", body: `มีคลิปของ ${event.payload.editorName || "สมาชิก"} ส่งเข้ารอตรวจ`, url: "/tasks" }, env });
+        {
+          const message = { title: "มีคลิปรอตรวจ", body: `มีคลิปของ ${event.payload.editorName || "สมาชิก"} ส่งเข้ารอตรวจ`, url: `/clips/${event.payload.clipId}` };
+          // Only this project's reviewers (and admins) — everyone else is not
+          // involved. Projects without designated reviewers still alert all.
+          const projectId = (event.payload as any).projectId;
+          const reviewers = projectId
+            ? await db.select({ id: userProjects.userId }).from(userProjects)
+                .where(and(eq(userProjects.projectId, projectId), eq(userProjects.role, "REVIEWER"))).catch(() => [])
+            : [];
+          if (reviewers.length) {
+            const admins = await db.select({ id: users.id }).from(users).where(and(eq(users.role, "ADMIN"), eq(users.isActive, true))).catch(() => []);
+            const ids = Array.from(new Set([...reviewers, ...admins].map((row: any) => row.id)));
+            await WebPushService.sendToUsers({ db, userIds: ids, message, env });
+          } else {
+            await WebPushService.sendToRoles({ db, roles: ["REVIEWER", "ADMIN"], message, env });
+          }
+        }
         break;
 
       default:

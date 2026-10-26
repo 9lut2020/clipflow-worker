@@ -140,6 +140,15 @@ async function main() {
     );
   `);
 
+  // Footage links, custom sheet columns, posters and per-project roles.
+  await db.execute(sql`ALTER TABLE episodes ADD COLUMN IF NOT EXISTS source_url TEXT;`);
+  await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS custom_columns JSONB DEFAULT '[]'::jsonb NOT NULL;`);
+  await db.execute(sql`ALTER TABLE clips ADD COLUMN IF NOT EXISTS kind VARCHAR(20) DEFAULT 'CLIP' NOT NULL;`);
+  await db.execute(sql`ALTER TABLE clips ADD COLUMN IF NOT EXISTS question TEXT;`);
+  await db.execute(sql`ALTER TABLE clips ADD COLUMN IF NOT EXISTS source_url TEXT;`);
+  await db.execute(sql`ALTER TABLE clips ADD COLUMN IF NOT EXISTS custom_fields JSONB DEFAULT '{}'::jsonb NOT NULL;`);
+  await db.execute(sql`ALTER TABLE user_projects ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'EDITOR' NOT NULL;`);
+
   console.log("🎉 NEON DB MIGRATION COMPLETE!");
   process.exit(0);
 }

@@ -98,7 +98,7 @@ export class ProjectService {
    */
   async updateProject(
     id: string,
-    updates: { name?: string; description?: string | null; pictureUrl?: string | null; isActive?: boolean }
+    updates: { name?: string; description?: string | null; pictureUrl?: string | null; isActive?: boolean; customColumns?: unknown[] }
   ) {
     const updated = await this.db
       .update(projectsSchema)
@@ -159,7 +159,7 @@ export class ProjectService {
     const order = query.sortOrder === "asc" ? asc : desc;
     const sortColumn = query.sortBy === "displayName" ? usersSchema.displayName : usersSchema.lastActiveAt;
     const [items, countRows] = await Promise.all([
-      this.db.select({ id: usersSchema.id, displayName: usersSchema.displayName, pictureUrl: usersSchema.pictureUrl, role: usersSchema.role, isActive: usersSchema.isActive, lastActiveAt: usersSchema.lastActiveAt }).from(userProjectsSchema).innerJoin(usersSchema, eq(usersSchema.id, userProjectsSchema.userId)).where(whereClause).orderBy(order(sortColumn), order(usersSchema.id)).limit(query.limit).offset(query.offset),
+      this.db.select({ id: usersSchema.id, displayName: usersSchema.displayName, pictureUrl: usersSchema.pictureUrl, role: usersSchema.role, projectRole: userProjectsSchema.role, isActive: usersSchema.isActive, lastActiveAt: usersSchema.lastActiveAt }).from(userProjectsSchema).innerJoin(usersSchema, eq(usersSchema.id, userProjectsSchema.userId)).where(whereClause).orderBy(order(sortColumn), order(usersSchema.id)).limit(query.limit).offset(query.offset),
       this.db.select({ count: sql<number>`count(*)` }).from(userProjectsSchema).innerJoin(usersSchema, eq(usersSchema.id, userProjectsSchema.userId)).where(whereClause),
     ]);
     return { items, total: Number(countRows[0]?.count || 0) };

@@ -97,7 +97,7 @@ export const RevisionService = {
           .where(eq(clipsSchema.id, clipId)),
         q.query.clips.findFirst({
           where: (c: any, { eq }: any) => eq(c.id, clipId),
-          columns: { id: true, name: true },
+          columns: { id: true, name: true, projectId: true },
           with: {
             owner: { columns: { lineUserId: true, displayName: true } },
             project: { columns: { name: true } },
@@ -139,6 +139,7 @@ export const RevisionService = {
               driveUrl,
               submitNote,
               clipId,
+              projectId: fullClip.projectId,
               channelAccessToken,
               adminGroupId,
             },
